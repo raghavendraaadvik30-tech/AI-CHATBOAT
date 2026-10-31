@@ -106,6 +106,12 @@ let speakTimeout = null;
 let primed = false, keepAlive = null;
 let pendingFinish = null;
 let speechGeneration = 0;
+let audioContext = null;
+let audioSource = null;
+let speechAnalyser = null;
+let analyserData = null;
+let cloudAudioActive = false;
+let audioEnergy = 0;
 // lip-sync timing: track real speech pace from word-boundary events
 let seqG = null, speechActive = false;
 let charsPerMs = 0.05, anchorTime = 0, anchorChar = 0, lastBoundaryChar = -1, lastBoundaryTime = 0;
@@ -319,7 +325,17 @@ function voicePitchFor(v) { return v && FEMALE_RE.test(v.name) ? 1.12 : 0.95; }
 // Unlock speech during a real user gesture. Browsers (esp. Chrome/Safari)
 // often refuse to speak later — after an async fetch — unless synthesis was
 // kicked off from a genuine interaction first. Call this from a click.
+function getAudioContext() {
+  if (!audioContext) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (AudioContextClass) audioContext = new AudioContextClass();
+  }
+  return audioContext;
+}
+
 function primeVoice() {
+  const context = getAudioContext();
+  try { context?.resume?.(); } catch {}
   const ss = window.speechSynthesis;
   if (!ss || !window.SpeechSynthesisUtterance) return;
   try {
@@ -336,8 +352,22 @@ function primeVoice() {
 
 function stopKeepAlive() { if (keepAlive) { clearInterval(keepAlive); keepAlive = null; } }
 
+function stopCloudAudio() {
+  cloudAudioActive = false;
+  audioEnergy = 0;
+  speechAnalyser = null;
+  analyserData = null;
+  if (!audioSource) return;
+  const source = audioSource;
+  audioSource = null;
+  source.onended = null;
+  try { source.stop(); } catch {}
+  try { source.disconnect(); } catch {}
+}
+
 function cancelSpeak() {
   speechGeneration++;
+  stopCloudAudio();
   stopSpeechSync();
   stopKeepAlive();
   if (speakTimeout) { clearTimeout(speakTimeout); speakTimeout = null; }
@@ -401,6 +431,59 @@ function speak(text) {
       begin();
       speakTimeout = setTimeout(finish, dur);
     }
+  });
+}
+
+async function speakAudio(text, audioBytes) {
+  cancelSpeak();
+  const generation = speechGeneration;
+  const context = getAudioContext();
+  if (!context) return speak(text);
+
+  try { await context.resume(); } catch {}
+  let buffer;
+  try {
+    buffer = await context.decodeAudioData(audioBytes.slice(0));
+  } catch {
+    if (generation === speechGeneration) return speak(text);
+    return;
+  }
+  if (generation !== speechGeneration) return;
+
+  const spokenText = cleanForSpeech(text) || " ";
+  const seq = buildVisemeSeq(spokenText);
+  setEmotionFromText(spokenText);
+
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      pendingFinish = null;
+      stopSpeechSync();
+      stopCloudAudio();
+      talking = false;
+      currentViseme = null;
+      resolve();
+    };
+    pendingFinish = finish;
+
+    const source = context.createBufferSource();
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.55;
+    source.buffer = buffer;
+    source.connect(analyser);
+    analyser.connect(context.destination);
+    source.onended = () => { if (generation === speechGeneration) finish(); };
+
+    audioSource = source;
+    speechAnalyser = analyser;
+    analyserData = new Uint8Array(analyser.fftSize);
+    cloudAudioActive = true;
+    talking = true;
+    startSpeechSync(seq, buffer.duration * 1000);
+    source.start(0);
   });
 }
 
@@ -578,6 +661,22 @@ function animate() {
     gazeY += (gazeTY - gazeY) * Math.min(1, dt * 10);
     applyGaze();
 
+    // Real neural-audio amplitude drives jaw/lip strength. This closes the
+    // mouth during actual pauses and opens it on voiced syllables.
+    if (cloudAudioActive && speechAnalyser && analyserData) {
+      speechAnalyser.getByteTimeDomainData(analyserData);
+      let sum = 0;
+      for (let i = 0; i < analyserData.length; i++) {
+        const sample = (analyserData[i] - 128) / 128;
+        sum += sample * sample;
+      }
+      const rms = Math.sqrt(sum / analyserData.length);
+      const targetEnergy = THREE.MathUtils.clamp((rms - 0.012) * 12, 0, 1);
+      audioEnergy += (targetEnergy - audioEnergy) * Math.min(1, dt * 22);
+    } else {
+      audioEnergy += (0 - audioEnergy) * Math.min(1, dt * 12);
+    }
+
     // derive the current viseme from the live-estimated speech position
     if (speechActive && seqG && seqG.length) {
       const est = anchorChar + (performance.now() - anchorTime) * charsPerMs;
@@ -590,7 +689,10 @@ function animate() {
     const speaking = talking || currentViseme;
     mouthGain += ((speaking ? 1 : 0) - mouthGain) * Math.min(1, dt * 12);
     if (currentViseme) {
-      for (const [k, v] of Object.entries(currentViseme)) setT(k, v * mouthGain);
+      const waveformGain = cloudAudioActive
+        ? THREE.MathUtils.clamp(0.08 + audioEnergy * 1.45, 0.08, 1.15)
+        : 1;
+      for (const [k, v] of Object.entries(currentViseme)) setT(k, v * mouthGain * waveformGain);
     } else if (talking) {
       const open = 0.1 + 0.16 * (0.5 + 0.5 * Math.sin(t * 13)) + 0.07 * Math.sin(t * 21 + 1);
       setT("jawOpen", open * mouthGain);
@@ -645,6 +747,7 @@ renderer.setAnimationLoop(animate);
 // ---------------------------------------------------------------- public API
 window.ariaAvatar = {
   speak,
+  speakAudio,
   primeVoice,
   startTalking() { cancelSpeak(); talking = true; },
   stopTalking() { cancelSpeak(); },

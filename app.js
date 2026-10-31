@@ -8,6 +8,9 @@ const PERSONA_STORE = "aria.persona";
 const VOICE_STORE = "aria.voice";
 const VOICE_NAME_STORE = "aria.voiceName";
 const LANGUAGE_STORE = "aria.language";
+const TTS_MODE_STORE = "aria.ttsMode";
+const TTS_MODEL_STORE = "aria.ttsModel";
+const DEFAULT_TTS_MODEL = "google/gemini-3.1-flash-tts-preview";
 
 const DEFAULT_MODEL = "openai/gpt-4o-mini";
 const DEFAULT_PERSONA =
@@ -56,6 +59,8 @@ const modelInput = el("model");
 const personaInput = el("persona");
 const voiceSelect = el("voiceSelect");
 const languageSelect = el("languageSelect");
+const ttsModeSelect = el("ttsModeSelect");
+const ttsModelInput = el("ttsModel");
 const toastsBox = el("toasts");
 const cameraEl = el("camera");
 const camPreview = el("camPreview");
@@ -89,6 +94,8 @@ const store = {
 function getKey() { return store.get(KEY_STORE) || ""; }
 function getModel() { return store.get(MODEL_STORE) || DEFAULT_MODEL; }
 function getPersona() { return store.get(PERSONA_STORE) || DEFAULT_PERSONA; }
+function getTtsMode() { return store.get(TTS_MODE_STORE) || "auto"; }
+function getTtsModel() { return store.get(TTS_MODEL_STORE) || DEFAULT_TTS_MODEL; }
 function getLanguage() {
   const value = store.get(LANGUAGE_STORE) || "en-IN";
   return LANGUAGES[value] ? value : "en-IN";
@@ -137,6 +144,8 @@ function loadSettings() {
   modelInput.value = getModel();
   personaInput.value = getPersona();
   languageSelect.value = getLanguage();
+  ttsModeSelect.value = getTtsMode();
+  ttsModelInput.value = getTtsModel();
   populateVoices();
 }
 
@@ -176,6 +185,8 @@ saveBtn.addEventListener("click", () => {
   store.set(MODEL_STORE, modelInput.value.trim() || DEFAULT_MODEL);
   store.set(PERSONA_STORE, personaInput.value.trim() || DEFAULT_PERSONA);
   store.set(LANGUAGE_STORE, language);
+  store.set(TTS_MODE_STORE, ttsModeSelect.value || "auto");
+  store.set(TTS_MODEL_STORE, ttsModelInput.value.trim() || DEFAULT_TTS_MODEL);
   document.documentElement.lang = language;
   store.set(VOICE_NAME_STORE, voiceSelect.value || "");
   syncAvatarSettings();
@@ -186,8 +197,8 @@ saveBtn.addEventListener("click", () => {
     saveBtn.textContent = original;
     closeModal();
     setPhase("idle");
-    if (language === "kn-IN" && !hasVoiceForLanguage(language)) {
-      toast("No Kannada system voice was found. Install a Kannada voice in your device settings for spoken Kannada.", "error", 9000);
+    if (language === "kn-IN" && getTtsMode() === "browser" && !hasVoiceForLanguage(language)) {
+      toast("No Kannada system voice was found. Select Automatic or OpenRouter neural voice for spoken Kannada.", "error", 9000);
     }
     if (!storageWorks) toast("Browser storage is blocked; these settings last only for this page session.", "error");
   }, 350);
@@ -400,6 +411,36 @@ async function askOpenRouter(text, frames, turn) {
   return reply;
 }
 
+async function fetchCloudSpeech(text, turn) {
+  const response = await fetch("https://openrouter.ai/api/v1/audio/speech", {
+    method: "POST",
+    signal: turn.controller.signal,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getKey()}`,
+      "HTTP-Referer": referer(),
+      "X-Title": "Aria Avatar Chat",
+    },
+    body: JSON.stringify({
+      model: getTtsModel(),
+      input: text,
+      voice: "Orus",
+      response_format: "mp3",
+      speed: 1,
+    }),
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Speech API ${response.status}: ${detail.slice(0, 180)}`);
+  }
+  return response.arrayBuffer();
+}
+
+function shouldUseCloudSpeech(language) {
+  const mode = getTtsMode();
+  return mode === "cloud" || (mode === "auto" && language === "kn-IN");
+}
+
 function typeOut(text, turn) {
   return new Promise((resolve) => {
     const div = addMessage("assistant", "");
@@ -454,10 +495,24 @@ async function runTurn(text) {
 
     const reply = await askOpenRouter(value, frames, turn);
     if (turn.cancelled || turn !== activeTurn) throw new DOMException("Cancelled", "AbortError");
+
+    let cloudAudio = null;
+    if (shouldUseCloudSpeech(turn.language)) {
+      try {
+        cloudAudio = await fetchCloudSpeech(reply, turn);
+      } catch (error) {
+        if (error?.name === "AbortError") throw error;
+        toast("Neural speech failed; trying the browser voice. " + (error.message || ""), "error", 9000);
+      }
+    }
+    if (turn.cancelled || turn !== activeTurn) throw new DOMException("Cancelled", "AbortError");
+
     showTyping(false);
     setPhase("speaking");
     window.ariaAvatar?.setLanguage?.(turn.language);
-    const speech = window.ariaAvatar?.speak?.(reply) || Promise.resolve();
+    const speech = cloudAudio && window.ariaAvatar?.speakAudio
+      ? window.ariaAvatar.speakAudio(reply, cloudAudio)
+      : (window.ariaAvatar?.speak?.(reply) || Promise.resolve());
     await Promise.all([speech, typeOut(reply, turn)]);
   } catch (error) {
     if (error?.name !== "AbortError") toast(error.message || "The request failed.", "error", 10000);

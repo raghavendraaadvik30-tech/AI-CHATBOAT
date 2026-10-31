@@ -42,6 +42,10 @@
         <span class="cam-badge"><span class="cam-dot"></span> live</span>
       </div>
 
+      <div class="voice-wave" aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span>
+      </div>
+
       <div class="status-pill" id="statusPill">
         <span class="status-dot"></span>
         <span id="statusText">Online</span>
@@ -111,11 +115,24 @@
         <small>Controls microphone recognition, AI reply language, voice, and lip shapes.</small>
       </label>
       <label class="field">
-        <span>Voice</span>
+        <span>Speech quality</span>
+        <select id="ttsModeSelect">
+          <option value="auto">Automatic (cloud for Kannada)</option>
+          <option value="cloud">OpenRouter neural voice</option>
+          <option value="browser">Browser system voice</option>
+        </select>
+      </label>
+      <label class="field" id="ttsModelField">
+        <span>OpenRouter speech model</span>
+        <input id="ttsModel" type="text" value="google/gemini-3.1-flash-tts-preview" />
+        <small>Cloud speech uses the same OpenRouter key and may incur model charges.</small>
+      </label>
+      <label class="field">
+        <span>Browser fallback voice</span>
         <select id="voiceSelect">
           <option value="">Automatic for selected language</option>
         </select>
-        <small>Kannada speech requires a Kannada voice installed in your browser or operating system.</small>
+        <small>Used when browser speech is selected or neural speech is unavailable.</small>
       </label>
       <label class="field">
         <span>Personality (system prompt)</span>

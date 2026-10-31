@@ -14,13 +14,12 @@ moves her **jaw and mouth** while she answers, powered by the
   the full **ARKit 52-blendshape** set, lit with image-based lighting for
   lifelike skin. (No Ready Player Me dependency — that service shut down in
   Jan 2026; assets load from the reliable jsDelivr CDN.)
-- **Speech-driven lip-sync + voice** — Aria speaks replies with the browser
-  Web Speech API. English and Kannada text are mapped to ARKit viseme shapes;
-  the animation starts at real audio onset and re-anchors on speech boundary
-  events. Toggle output with 🔊.
-- **English + Kannada conversation** — Settings controls recognition, reply,
-  voice, and mouth-shape language (`en-IN` or `kn-IN`). Spoken Kannada requires
-  a Kannada system voice installed on the device.
+- **Neural Kannada voice** — Kannada defaults to OpenRouter's speech endpoint
+  using the same API key, so it does not depend on a Kannada voice being
+  installed on the device. Browser speech remains an automatic fallback.
+- **Waveform-assisted lip-sync** — cloud speech is decoded through Web Audio.
+  Exact audio duration controls viseme pacing, while live waveform energy closes
+  the mouth during pauses and scales jaw movement during voiced syllables.
 - **No-echo live conversation** — 📞 starts a coordinated half-duplex call:
   listen → think → speak → acoustic pause → listen. The microphone is closed
   while Aria speaks, which prevents speaker output from feeding back as a new
@@ -44,11 +43,11 @@ moves her **jaw and mouth** while she answers, powered by the
 1. Serve the project: `python3 -m http.server 8000`.
 2. Open `http://localhost:8000` in Chrome or Edge.
 3. Click **⚙ settings**, add your OpenRouter API key, choose English or Kannada,
-   and select an installed voice.
+   and choose the speech mode. Kannada defaults to the OpenRouter neural voice.
 4. Tap 📞 for a no-echo hands-free conversation, or use 🎤 for one voice turn.
 
-Your key is stored **only** in your browser's `localStorage` and is sent
-only to OpenRouter.
+Your key is stored **only** in your browser's `localStorage` and is sent to
+OpenRouter for chat/vision and, when enabled, neural speech generation.
 
 ## 📁 Project structure
 
