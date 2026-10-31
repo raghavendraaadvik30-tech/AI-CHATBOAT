@@ -77,45 +77,41 @@ html, body {
   0%, 100% { transform: translateY(-50%) scale(1); opacity: 0.8; }
   50% { transform: translateY(-50%) scale(1.08); opacity: 1; }
 }
-.avatar-float { animation: float 5s ease-in-out infinite; }
-@keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-14px); }
+/* 3D avatar canvas */
+.avatar-canvas {
+  position: relative;
+  width: 100%;
+  max-width: 460px;
+  height: 440px;
+  display: grid;
+  place-items: center;
+  filter: drop-shadow(0 24px 50px rgba(0,0,0,0.45));
 }
-.avatar { width: 320px; height: 360px; display: block; filter: drop-shadow(0 20px 40px rgba(0,0,0,0.4)); }
+.avatar-canvas canvas { width: 100% !important; height: 100% !important; display: block; }
 
-/* breathing on body */
-.avatar .body { transform-origin: 160px 300px; animation: breathe 4s ease-in-out infinite; }
-@keyframes breathe {
-  0%, 100% { transform: scaleY(1); }
-  50% { transform: scaleY(1.02); }
+.avatar-loader {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+  padding: 0 24px;
 }
-
-/* blinking (lids slide down) */
-.avatar .lid { transform-box: fill-box; transform-origin: top; transform: scaleY(0); }
-.avatar.blink .lid { animation: blink 0.28s ease; }
-@keyframes blink {
-  0%, 100% { transform: scaleY(0); }
-  45%, 55% { transform: scaleY(1); }
+.avatar-loader.error .spinner { display: none; }
+.avatar-loader.error { color: #ffb4b4; }
+.spinner {
+  width: 42px; height: 42px;
+  border-radius: 50%;
+  border: 3px solid rgba(255,255,255,0.15);
+  border-top-color: var(--accent);
+  animation: spin 0.9s linear infinite;
 }
-
-/* talking mouth */
-.avatar .mouth-group { transform-box: fill-box; transform-origin: center; }
-.avatar.talking .mouth-group { animation: talk 0.26s ease-in-out infinite; }
-@keyframes talk {
-  0%, 100% { transform: scaleY(0.5) translateY(2px); }
-  50% { transform: scaleY(1.25) translateY(-1px); }
-}
-
-/* subtle eye look-around */
-.avatar.talking .iris, .avatar.talking .pupil, .avatar.talking .glint {
-  animation: glance 3s ease-in-out infinite;
-}
-@keyframes glance {
-  0%, 100% { transform: translateX(0); }
-  30% { transform: translateX(3px); }
-  70% { transform: translateX(-3px); }
-}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 .status-pill {
   margin-top: 8px;
@@ -295,6 +291,6 @@ html, body {
   html, body { overflow: auto; }
   .app { grid-template-columns: 1fr; height: auto; min-height: 100%; }
   .stage { padding: 20px 0; }
-  .avatar { width: 230px; height: 260px; }
+  .avatar-canvas { height: 320px; }
   .chat { height: 70vh; min-height: 480px; }
 }

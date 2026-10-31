@@ -8,6 +8,16 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
+
+  <!-- Three.js via import map (jsDelivr: reliable CORS + binary assets) -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
 </head>
 <body>
   <div class="bg-orbs">
@@ -20,85 +30,11 @@
     <!-- ============ AVATAR STAGE ============ -->
     <section class="stage" aria-label="AI avatar">
       <div class="avatar-glow"></div>
-      <div class="avatar-float" id="avatarFloat">
-        <svg id="avatar" class="avatar" viewBox="0 0 320 360" role="img" aria-label="Aria avatar">
-          <defs>
-            <radialGradient id="skin" cx="50%" cy="38%" r="70%">
-              <stop offset="0%" stop-color="#ffe8d6" />
-              <stop offset="100%" stop-color="#f3c6a8" />
-            </radialGradient>
-            <linearGradient id="hair" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="#5b3a8e" />
-              <stop offset="100%" stop-color="#2e1a63" />
-            </linearGradient>
-            <linearGradient id="hairShine" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stop-color="#9b6bd6" />
-              <stop offset="100%" stop-color="#5b3a8e" />
-            </linearGradient>
-            <linearGradient id="shirt" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="#2de2e6" />
-              <stop offset="100%" stop-color="#1368ce" />
-            </linearGradient>
-            <radialGradient id="cheek" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stop-color="#ff9a9e" stop-opacity="0.55" />
-              <stop offset="100%" stop-color="#ff9a9e" stop-opacity="0" />
-            </radialGradient>
-          </defs>
-
-          <!-- shoulders / body -->
-          <path class="body" d="M60 360 C70 285 120 262 160 262 C200 262 250 285 260 360 Z" fill="url(#shirt)" />
-          <path class="collar" d="M135 268 L160 300 L185 268 Z" fill="#ffffff" opacity="0.18" />
-
-          <!-- neck -->
-          <rect x="140" y="222" width="40" height="52" rx="18" fill="url(#skin)" />
-          <path d="M140 250 q20 18 40 0 v-28 h-40 Z" fill="#e0a98a" opacity="0.5" />
-
-          <!-- back hair -->
-          <path d="M78 150 C70 60 150 28 160 28 C170 28 250 60 242 150 C250 210 236 250 220 262 L100 262 C84 250 70 210 78 150 Z" fill="url(#hair)" />
-
-          <!-- face -->
-          <ellipse class="face" cx="160" cy="160" rx="82" ry="94" fill="url(#skin)" />
-
-          <!-- ears -->
-          <circle cx="80" cy="168" r="16" fill="url(#skin)" />
-          <circle cx="240" cy="168" r="16" fill="url(#skin)" />
-
-          <!-- cheeks -->
-          <ellipse cx="112" cy="188" rx="22" ry="15" fill="url(#cheek)" />
-          <ellipse cx="208" cy="188" rx="22" ry="15" fill="url(#cheek)" />
-
-          <!-- eyebrows -->
-          <path class="brow" d="M106 126 q24 -14 48 -2" fill="none" stroke="#3a2558" stroke-width="5" stroke-linecap="round" />
-          <path class="brow" d="M166 124 q24 -12 48 2" fill="none" stroke="#3a2558" stroke-width="5" stroke-linecap="round" />
-
-          <!-- eyes -->
-          <g class="eye eye-left">
-            <ellipse class="eye-white" cx="130" cy="152" rx="20" ry="15" fill="#ffffff" />
-            <circle class="iris" cx="130" cy="153" r="9" fill="#6b3fa0" />
-            <circle class="pupil" cx="130" cy="153" r="4.5" fill="#1a0f2e" />
-            <circle class="glint" cx="134" cy="149" r="2.6" fill="#ffffff" />
-            <rect class="lid" x="108" y="134" width="44" height="34" rx="14" fill="url(#skin)" />
-          </g>
-          <g class="eye eye-right">
-            <ellipse class="eye-white" cx="190" cy="152" rx="20" ry="15" fill="#ffffff" />
-            <circle class="iris" cx="190" cy="153" r="9" fill="#6b3fa0" />
-            <circle class="pupil" cx="190" cy="153" r="4.5" fill="#1a0f2e" />
-            <circle class="glint" cx="194" cy="149" r="2.6" fill="#ffffff" />
-            <rect class="lid" x="168" y="134" width="44" height="34" rx="14" fill="url(#skin)" />
-          </g>
-
-          <!-- nose -->
-          <path d="M158 160 q-6 18 -2 24 q4 4 8 0" fill="none" stroke="#e0a98a" stroke-width="3.5" stroke-linecap="round" />
-
-          <!-- mouth -->
-          <g class="mouth-group">
-            <path class="mouth" d="M138 206 q22 16 44 0 q-22 10 -44 0 Z" fill="#b23a5a" />
-            <path class="lip" d="M138 206 q22 14 44 0" fill="none" stroke="#9b2c4a" stroke-width="2.5" stroke-linecap="round" />
-          </g>
-
-          <!-- front hair / bangs -->
-          <path d="M80 152 C74 70 150 30 160 30 C170 30 170 92 150 108 C176 100 196 108 208 128 C214 86 246 92 240 150 C236 110 210 128 206 150 C202 118 150 128 150 128 C120 128 92 120 80 152 Z" fill="url(#hairShine)" />
-        </svg>
+      <div class="avatar-canvas" id="avatarCanvas" role="img" aria-label="Aria 3D avatar">
+        <div class="avatar-loader" id="avatarLoader">
+          <div class="spinner"></div>
+          <span id="loaderText">Loading Aria…</span>
+        </div>
       </div>
 
       <div class="status-pill" id="statusPill">
@@ -161,6 +97,8 @@
     </div>
   </div>
 
+  <!-- 3D avatar engine (module) then chat logic (classic) -->
+  <script type="module" src="avatar3d.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

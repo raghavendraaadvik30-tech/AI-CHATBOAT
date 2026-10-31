@@ -15,7 +15,6 @@ const DEFAULT_PERSONA =
 
 // ---- element refs ----
 const el = (id) => document.getElementById(id);
-const avatar = el("avatar");
 const messagesBox = el("messages");
 const typing = el("typing");
 const composer = el("composer");
@@ -90,17 +89,10 @@ saveBtn.addEventListener("click", () => {
 modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
 
 // ------------------------------------------------------------------ avatar fx
-// Blink at random intervals
-function scheduleBlink() {
-  const delay = 2200 + Math.random() * 3500;
-  setTimeout(() => {
-    avatar.classList.add("blink");
-    setTimeout(() => avatar.classList.remove("blink"), 300);
-    scheduleBlink();
-  }, delay);
-}
-function startTalking() { avatar.classList.add("talking"); }
-function stopTalking() { avatar.classList.remove("talking"); }
+// The 3D engine (avatar3d.js) owns blinking + idle motion. We only toggle
+// the talking state so the mouth syncs to replies.
+function startTalking() { window.ariaAvatar?.startTalking(); }
+function stopTalking() { window.ariaAvatar?.stopTalking(); }
 
 function setStatus(text, thinking = false) {
   statusText.textContent = text;
@@ -218,7 +210,6 @@ composer.addEventListener("submit", (e) => {
 // ------------------------------------------------------------------ init
 function init() {
   try { loadSettings(); } catch (e) { /* storage blocked — handled by safe store */ }
-  scheduleBlink();
   // greeting
   addMessage(
     "assistant",
