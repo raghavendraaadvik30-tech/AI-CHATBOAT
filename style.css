@@ -201,6 +201,11 @@ html, body {
 .icon-btn:hover { background: rgba(255,255,255,0.08); color: var(--text); }
 #settingsBtn:hover { transform: rotate(45deg); }
 .icon-btn.active { background: rgba(53,208,127,0.22); color: #7cf0ad; }
+.icon-btn.calling {
+  background: linear-gradient(135deg, #35d07f, #19a862);
+  color: #fff;
+  animation: mic-pulse 1.3s ease-in-out infinite;
+}
 .chat-head-actions { display: flex; align-items: center; gap: 4px; }
 
 /* live camera preview (picture-in-picture over the avatar stage) */

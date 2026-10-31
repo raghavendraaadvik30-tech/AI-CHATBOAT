@@ -36,6 +36,8 @@ const voiceSelect = el("voiceSelect");
 
 // ---- conversation state ----
 let history = []; // {role, content}
+let liveMode = false;   // hands-free continuous voice conversation
+let processing = false; // a turn (send -> reply -> speak) is in progress
 
 // ------------------------------------------------------------------ safe store
 // Some browsers throw a SecurityError when touching localStorage on a file://
@@ -336,13 +338,20 @@ function captureFrame() {
 cameraBtn.addEventListener("click", () => { cameraOn ? stopCamera() : startCamera(); });
 
 // ------------------------------------------------------------------ submit
-function sendText(text) {
+async function sendText(text) {
   const t = (text || "").trim();
   if (!t) return;
   const img = cameraOn ? captureFrame() : null; // snapshot of what Aria sees
   addMessage("user", img ? t + "  📷" : t);
   input.value = "";
-  askOpenRouter(t, img);
+  processing = true;
+  try {
+    await askOpenRouter(t, img); // resolves after Aria finishes speaking
+  } finally {
+    processing = false;
+    // hands-free: once she's done replying, listen again for the next turn
+    if (liveMode) setTimeout(() => { if (liveMode && !listening && !processing) startListening(); }, 450);
+  }
 }
 composer.addEventListener("submit", (e) => {
   e.preventDefault();
@@ -373,6 +382,7 @@ function startListening() {
   listening = true;
   micBtn.classList.add("listening");
   window.ariaAvatar?.setListening?.(true);
+  setStatus("Listening…");
   try { recog.start(); } catch {}
 }
 
@@ -399,7 +409,17 @@ if (SR) {
       toast("Couldn't access the microphone. Allow mic permission, then tap 🎤 again.", "error");
     }
   };
-  recog.onend = () => { input.placeholder = "Say something to Aria…"; stopListening(); };
+  recog.onend = () => {
+    input.placeholder = "Say something to Aria…";
+    listening = false;
+    micBtn.classList.remove("listening");
+    window.ariaAvatar?.setListening?.(false);
+    if (!liveMode && !processing) setStatus("Online");
+    // live mode: if a turn isn't in progress, keep the ear open for the next one
+    if (liveMode && !processing) {
+      setTimeout(() => { if (liveMode && !processing && !listening) startListening(); }, 500);
+    }
+  };
 
   micBtn.addEventListener("click", () => {
     window.ariaAvatar?.primeVoice?.();
@@ -409,6 +429,29 @@ if (SR) {
   // No speech recognition support (e.g. Firefox) — hide the mic button.
   micBtn.style.display = "none";
 }
+
+// ------------------------------------------------------------------ live conversation (hands-free)
+const callBtn = el("callBtn");
+async function startLive() {
+  if (!SR) { toast("Live voice chat needs speech recognition — try Chrome or Edge.", "error"); return; }
+  if (!getKey()) { openModal(); toast("Add your OpenRouter API key to start a live chat.", "error"); return; }
+  liveMode = true;
+  callBtn.classList.add("active", "calling");
+  callBtn.title = "End live conversation";
+  window.ariaAvatar?.primeVoice?.();
+  if (!cameraOn) { try { await startCamera(); } catch {} } // scan + see the user
+  toast("Live conversation on — just talk, I'm listening. Tap 📞 to end.", "info");
+  if (!processing && !listening) startListening();
+}
+function stopLive() {
+  liveMode = false;
+  callBtn.classList.remove("active", "calling");
+  callBtn.title = "Start live voice conversation";
+  stopListening();
+  window.ariaAvatar?.stopTalking?.();
+  setStatus("Online");
+}
+callBtn?.addEventListener("click", () => { liveMode ? stopLive() : startLive(); });
 
 // ------------------------------------------------------------------ init
 function init() {
