@@ -12,7 +12,9 @@ const VOICE_STORE = "aria.voice";
 const DEFAULT_MODEL = "openai/gpt-4o-mini";
 const DEFAULT_PERSONA =
   "You are Aria, a warm, upbeat and friendly AI companion. " +
-  "Keep replies concise, natural and human. Use a little personality and the occasional emoji.";
+  "Keep replies concise, natural and human. Use a little personality and the occasional emoji. " +
+  "When the user shares their camera, an image of what their webcam sees is attached to their message — " +
+  "look at it and answer naturally about what you see (count fingers, describe colours/objects, etc.).";
 
 // ---- element refs ----
 const el = (id) => document.getElementById(id);
@@ -138,7 +140,7 @@ function referer() {
 }
 
 // ------------------------------------------------------------------ API call
-async function askOpenRouter(userText) {
+async function askOpenRouter(userText, imageDataUrl = null) {
   const key = getKey();
   if (!key) {
     openModal();
@@ -146,12 +148,22 @@ async function askOpenRouter(userText) {
     return;
   }
 
+  // Store plain text in history (so we don't resend heavy image bytes every turn).
   history.push({ role: "user", content: userText });
 
-  const payload = {
-    model: getModel(),
-    messages: [{ role: "system", content: getPersona() }, ...history],
-  };
+  const messages = [{ role: "system", content: getPersona() }, ...history];
+  // Attach the camera frame to just the current message (OpenAI-style vision).
+  if (imageDataUrl) {
+    messages[messages.length - 1] = {
+      role: "user",
+      content: [
+        { type: "text", text: userText || "What do you see?" },
+        { type: "image_url", image_url: { url: imageDataUrl } },
+      ],
+    };
+  }
+
+  const payload = { model: getModel(), messages };
 
   setStatus("Thinking…", true);
   showTyping(true);
@@ -217,13 +229,65 @@ function typeOut(text) {
   });
 }
 
+// ------------------------------------------------------------------ camera (vision)
+const cameraBtn = el("cameraBtn");
+const cameraEl = el("camera");
+const camPreview = el("camPreview");
+let camStream = null;
+let cameraOn = false;
+
+async function startCamera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    addMessage("assistant", "Your browser doesn't support camera access here.");
+    return;
+  }
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+    cameraEl.srcObject = camStream;
+    await cameraEl.play().catch(() => {});
+    camPreview.hidden = false;
+    cameraOn = true;
+    cameraBtn.classList.add("active");
+    cameraBtn.title = "Camera on — click to turn off";
+    addMessage("assistant", "Camera's on — I can see you now! 👀 Show me something and ask what it is, how many fingers, your shirt colour…");
+  } catch (e) {
+    addMessage("assistant", "I couldn't open the camera. Please allow camera permission in your browser and tap 📷 again.");
+  }
+}
+
+function stopCamera() {
+  if (camStream) { camStream.getTracks().forEach((t) => t.stop()); camStream = null; }
+  cameraEl.srcObject = null;
+  camPreview.hidden = true;
+  cameraOn = false;
+  cameraBtn.classList.remove("active");
+  cameraBtn.title = "Let Aria see you (camera)";
+}
+
+// grab the current webcam frame as a compressed JPEG data URL
+function captureFrame() {
+  const v = cameraEl;
+  if (!v || !v.videoWidth) return null;
+  const maxW = 640;
+  const scale = Math.min(1, maxW / v.videoWidth);
+  const w = Math.round(v.videoWidth * scale);
+  const h = Math.round(v.videoHeight * scale);
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  c.getContext("2d").drawImage(v, 0, 0, w, h);
+  try { return c.toDataURL("image/jpeg", 0.8); } catch { return null; }
+}
+
+cameraBtn.addEventListener("click", () => { cameraOn ? stopCamera() : startCamera(); });
+
 // ------------------------------------------------------------------ submit
 function sendText(text) {
   const t = (text || "").trim();
   if (!t) return;
-  addMessage("user", t);
+  const img = cameraOn ? captureFrame() : null; // snapshot of what Aria sees
+  addMessage("user", img ? t + "  📷" : t);
   input.value = "";
-  askOpenRouter(t);
+  askOpenRouter(t, img);
 }
 composer.addEventListener("submit", (e) => {
   e.preventDefault();

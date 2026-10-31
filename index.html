@@ -37,6 +37,11 @@
         </div>
       </div>
 
+      <div class="cam-preview" id="camPreview" hidden>
+        <video id="camera" autoplay playsinline muted></video>
+        <span class="cam-badge"><span class="cam-dot"></span> live</span>
+      </div>
+
       <div class="status-pill" id="statusPill">
         <span class="status-dot"></span>
         <span id="statusText">Online</span>
@@ -50,6 +55,7 @@
       <header class="chat-head">
         <div class="chat-head-title">Chat with Aria</div>
         <div class="chat-head-actions">
+          <button id="cameraBtn" class="icon-btn" title="Let Aria see you (camera)" aria-label="Toggle camera">📷</button>
           <button id="voiceBtn" class="icon-btn" title="Toggle voice" aria-label="Toggle voice">🔊</button>
           <button id="settingsBtn" class="icon-btn" title="Settings" aria-label="Settings">⚙</button>
         </div>

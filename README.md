@@ -21,6 +21,11 @@ moves her **jaw and mouth** while she answers, powered by the
 - **Voice commands** — tap the 🎤 mic button and **talk to Aria**; your speech
   is transcribed (Web Speech Recognition) and sent automatically. (Supported in
   Chrome/Edge/Safari; the button hides itself where unsupported.)
+- **Vision (camera)** — tap 📷 to share your webcam. A live preview appears over
+  the avatar, and each message you send includes the current frame, so Aria can
+  **answer about what she sees** — count fingers, name your shirt colour,
+  identify objects, etc. Requires a vision-capable model (the default
+  `openai/gpt-4o-mini` works).
 - **Expressive face** — eyebrow raises, eye **saccades** (natural darting
   gaze), blinking, cheek/nose/squint movement, head nods while talking, and an
   **emotion** read from the reply (happy / curious / excited) that shapes the

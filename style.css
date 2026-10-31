@@ -187,7 +187,42 @@ html, body {
 }
 .icon-btn:hover { background: rgba(255,255,255,0.08); color: var(--text); }
 #settingsBtn:hover { transform: rotate(45deg); }
+.icon-btn.active { background: rgba(53,208,127,0.22); color: #7cf0ad; }
 .chat-head-actions { display: flex; align-items: center; gap: 4px; }
+
+/* live camera preview (picture-in-picture over the avatar stage) */
+.cam-preview {
+  position: absolute;
+  left: 10px; bottom: 8px;
+  width: 150px; height: 112px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 2px solid rgba(124,240,173,0.6);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  background: #000;
+  z-index: 5;
+}
+.cam-preview video {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1); /* mirror, like a selfie */
+}
+.cam-badge {
+  position: absolute;
+  top: 6px; left: 6px;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px;
+  font-size: 11px; font-weight: 600;
+  color: #fff;
+  background: rgba(0,0,0,0.45);
+  border-radius: 999px;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.cam-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #ff4d6d; box-shadow: 0 0 8px #ff4d6d;
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
 
 .messages {
   flex: 1;
