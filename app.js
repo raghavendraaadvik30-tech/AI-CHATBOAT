@@ -10,7 +10,10 @@ const VOICE_NAME_STORE = "aria.voiceName";
 const LANGUAGE_STORE = "aria.language";
 const TTS_MODE_STORE = "aria.ttsMode";
 const TTS_MODEL_STORE = "aria.ttsModel";
+const GOOGLE_KEY_STORE = "aria.googleApiKey";
+const GOOGLE_TTS_MODEL_STORE = "aria.googleTtsModel";
 const DEFAULT_TTS_MODEL = "google/gemini-3.1-flash-tts-preview";
+const DEFAULT_GOOGLE_TTS_MODEL = "gemini-3.1-flash-tts-preview";
 
 const DEFAULT_MODEL = "openai/gpt-4o-mini";
 const DEFAULT_PERSONA =
@@ -55,12 +58,14 @@ const statusPill = el("statusPill");
 const statusText = el("statusText");
 const modal = el("modal");
 const apiKeyInput = el("apiKey");
+const googleApiKeyInput = el("googleApiKey");
 const modelInput = el("model");
 const personaInput = el("persona");
 const voiceSelect = el("voiceSelect");
 const languageSelect = el("languageSelect");
 const ttsModeSelect = el("ttsModeSelect");
 const ttsModelInput = el("ttsModel");
+const googleTtsModelInput = el("googleTtsModel");
 const toastsBox = el("toasts");
 const cameraEl = el("camera");
 const camPreview = el("camPreview");
@@ -92,10 +97,15 @@ const store = {
 };
 
 function getKey() { return store.get(KEY_STORE) || ""; }
+function getGoogleKey() { return store.get(GOOGLE_KEY_STORE) || ""; }
 function getModel() { return store.get(MODEL_STORE) || DEFAULT_MODEL; }
 function getPersona() { return store.get(PERSONA_STORE) || DEFAULT_PERSONA; }
-function getTtsMode() { return store.get(TTS_MODE_STORE) || "auto"; }
+function getTtsMode() {
+  const mode = store.get(TTS_MODE_STORE) || "auto";
+  return mode === "cloud" ? "openrouter" : mode;
+}
 function getTtsModel() { return store.get(TTS_MODEL_STORE) || DEFAULT_TTS_MODEL; }
+function getGoogleTtsModel() { return store.get(GOOGLE_TTS_MODEL_STORE) || DEFAULT_GOOGLE_TTS_MODEL; }
 function getLanguage() {
   const value = store.get(LANGUAGE_STORE) || "en-IN";
   return LANGUAGES[value] ? value : "en-IN";
@@ -141,11 +151,13 @@ function populateVoices() {
 
 function loadSettings() {
   apiKeyInput.value = getKey();
+  googleApiKeyInput.value = getGoogleKey();
   modelInput.value = getModel();
   personaInput.value = getPersona();
   languageSelect.value = getLanguage();
-  ttsModeSelect.value = getTtsMode();
+  ttsModeSelect.value = getTtsMode() === "cloud" ? "openrouter" : getTtsMode();
   ttsModelInput.value = getTtsModel();
+  googleTtsModelInput.value = getGoogleTtsModel();
   populateVoices();
 }
 
@@ -182,11 +194,13 @@ const saveBtn = el("saveSettings");
 saveBtn.addEventListener("click", () => {
   const language = LANGUAGES[languageSelect.value] ? languageSelect.value : "en-IN";
   store.set(KEY_STORE, apiKeyInput.value.trim());
+  store.set(GOOGLE_KEY_STORE, googleApiKeyInput.value.trim());
   store.set(MODEL_STORE, modelInput.value.trim() || DEFAULT_MODEL);
   store.set(PERSONA_STORE, personaInput.value.trim() || DEFAULT_PERSONA);
   store.set(LANGUAGE_STORE, language);
   store.set(TTS_MODE_STORE, ttsModeSelect.value || "auto");
   store.set(TTS_MODEL_STORE, ttsModelInput.value.trim() || DEFAULT_TTS_MODEL);
+  store.set(GOOGLE_TTS_MODEL_STORE, googleTtsModelInput.value.trim() || DEFAULT_GOOGLE_TTS_MODEL);
   document.documentElement.lang = language;
   store.set(VOICE_NAME_STORE, voiceSelect.value || "");
   syncAvatarSettings();
@@ -414,7 +428,71 @@ async function askOpenRouter(text, frames, turn) {
   return reply;
 }
 
-async function fetchCloudSpeech(text, turn) {
+function base64ToBytes(value) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function pcm16ToWav(pcm, sampleRate = 24000, channels = 1) {
+  const header = new ArrayBuffer(44);
+  const view = new DataView(header);
+  const write = (offset, value) => [...value].forEach((char, i) => view.setUint8(offset + i, char.charCodeAt(0)));
+  write(0, "RIFF");
+  view.setUint32(4, 36 + pcm.byteLength, true);
+  write(8, "WAVE"); write(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * channels * 2, true);
+  view.setUint16(32, channels * 2, true);
+  view.setUint16(34, 16, true);
+  write(36, "data");
+  view.setUint32(40, pcm.byteLength, true);
+  const wav = new Uint8Array(44 + pcm.byteLength);
+  wav.set(new Uint8Array(header), 0);
+  wav.set(pcm, 44);
+  return wav.buffer;
+}
+
+async function fetchGoogleSpeech(text, turn) {
+  const key = getGoogleKey();
+  if (!key) throw new Error("Google Gemini key is not configured");
+  const model = encodeURIComponent(getGoogleTtsModel());
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    method: "POST",
+    signal: turn.controller.signal,
+    headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text }] }],
+      generationConfig: {
+        responseModalities: ["AUDIO"],
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Orus" } } },
+      },
+    }),
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Google speech ${response.status}: ${detail.slice(0, 180)}`);
+  }
+  const data = await response.json();
+  const parts = data?.candidates?.flatMap((candidate) => candidate?.content?.parts || []) || [];
+  const inline = parts.find((part) => part.inlineData?.data || part.inline_data?.data);
+  const payload = inline?.inlineData || inline?.inline_data;
+  if (!payload?.data) throw new Error("Google speech returned no audio data");
+
+  const bytes = base64ToBytes(payload.data);
+  const mime = (payload.mimeType || payload.mime_type || "").toLowerCase();
+  if (mime.includes("l16") || mime.includes("pcm")) {
+    const rate = Number(mime.match(/rate[=;](\d+)/)?.[1] || 24000);
+    return pcm16ToWav(bytes, rate, 1);
+  }
+  return bytes.buffer;
+}
+
+async function fetchOpenRouterSpeech(text, turn) {
   const response = await fetch("https://openrouter.ai/api/v1/audio/speech", {
     method: "POST",
     signal: turn.controller.signal,
@@ -434,16 +512,33 @@ async function fetchCloudSpeech(text, turn) {
   });
   if (!response.ok) {
     const detail = await response.text();
-    throw new Error(`Speech API ${response.status}: ${detail.slice(0, 180)}`);
+    throw new Error(`OpenRouter speech ${response.status}: ${detail.slice(0, 180)}`);
   }
   return response.arrayBuffer();
 }
 
-function shouldUseCloudSpeech(language) {
+async function fetchNeuralSpeech(text, turn) {
   const mode = getTtsMode();
-  if (mode === "cloud") return true;
-  if (language === "kn-IN" && !hasVoiceForLanguage(language)) return true;
-  return mode === "auto" && language === "kn-IN";
+  const providers = mode === "openrouter"
+    ? [fetchOpenRouterSpeech, fetchGoogleSpeech]
+    : [fetchGoogleSpeech, fetchOpenRouterSpeech];
+  const errors = [];
+  for (const provider of providers) {
+    try {
+      const audio = await provider(text, turn);
+      return { audio, provider: provider === fetchGoogleSpeech ? "Google" : "OpenRouter" };
+    } catch (error) {
+      if (error?.name === "AbortError") throw error;
+      errors.push(error.message || String(error));
+    }
+  }
+  throw new Error(errors.join(" | "));
+}
+
+function shouldUseNeuralSpeech(language) {
+  const mode = getTtsMode();
+  if (mode === "browser") return language === "kn-IN" && !hasVoiceForLanguage(language);
+  return mode === "google" || mode === "openrouter" || mode === "auto";
 }
 
 function typeOut(text, turn) {
@@ -501,13 +596,13 @@ async function runTurn(text) {
     const reply = await askOpenRouter(value, frames, turn);
     if (turn.cancelled || turn !== activeTurn) throw new DOMException("Cancelled", "AbortError");
 
-    let cloudAudio = null;
-    if (shouldUseCloudSpeech(turn.language)) {
+    let neuralSpeech = null;
+    if (shouldUseNeuralSpeech(turn.language)) {
       try {
-        cloudAudio = await fetchCloudSpeech(reply, turn);
+        neuralSpeech = await fetchNeuralSpeech(reply, turn);
       } catch (error) {
         if (error?.name === "AbortError") throw error;
-        toast("Neural speech failed; trying the browser voice. " + (error.message || ""), "error", 9000);
+        toast("Neural speech failed; trying the browser voice. " + (error.message || ""), "error", 10000);
       }
     }
     if (turn.cancelled || turn !== activeTurn) throw new DOMException("Cancelled", "AbortError");
@@ -515,8 +610,8 @@ async function runTurn(text) {
     showTyping(false);
     setPhase("speaking");
     window.ariaAvatar?.setLanguage?.(turn.language);
-    const speech = cloudAudio && window.ariaAvatar?.speakAudio
-      ? window.ariaAvatar.speakAudio(reply, cloudAudio)
+    const speech = neuralSpeech?.audio && window.ariaAvatar?.speakAudio
+      ? window.ariaAvatar.speakAudio(reply, neuralSpeech.audio)
       : (window.ariaAvatar?.speak?.(reply) || Promise.resolve());
     await Promise.all([speech, typeOut(reply, turn)]);
   } catch (error) {

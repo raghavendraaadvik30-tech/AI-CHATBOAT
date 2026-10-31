@@ -14,10 +14,11 @@ moves her **jaw and mouth** while she answers, powered by the
   the full **ARKit 52-blendshape** set, lit with image-based lighting for
   lifelike skin. (No Ready Player Me dependency — that service shut down in
   Jan 2026; assets load from the reliable jsDelivr CDN.)
-- **Neural Kannada voice** — Kannada defaults to OpenRouter's speech endpoint
-  using the same API key, so it does not depend on a Kannada voice being
-  installed on the device. Browser speech remains an automatic fallback.
-- **Waveform-assisted lip-sync** — cloud speech is decoded through Web Audio.
+- **Dual-provider neural speech** — the OpenRouter key handles chat, vision, and
+  fallback speech. An optional Google Gemini key provides primary Kannada TTS
+  through the native Gemini API. Automatic mode tries Google, then OpenRouter,
+  then the browser system voice.
+- **Waveform-assisted lip-sync** — neural speech is decoded through Web Audio.
   Exact audio duration controls viseme pacing, while live waveform energy closes
   the mouth during pauses and scales jaw movement during voiced syllables.
 - **No-echo live conversation** — 📞 starts a coordinated half-duplex call:
@@ -42,12 +43,14 @@ moves her **jaw and mouth** while she answers, powered by the
 
 1. Serve the project: `python3 -m http.server 8000`.
 2. Open `http://localhost:8000` in Chrome or Edge.
-3. Click **⚙ settings**, add your OpenRouter API key, choose English or Kannada,
-   and choose the speech mode. Kannada defaults to the OpenRouter neural voice.
+3. Click **⚙ settings**, add your OpenRouter API key and optional Google Gemini
+   API key, choose English or Kannada, and leave speech mode on Automatic.
 4. Tap 📞 for a no-echo hands-free conversation, or use 🎤 for one voice turn.
 
-Your key is stored **only** in your browser's `localStorage` and is sent to
-OpenRouter for chat/vision and, when enabled, neural speech generation.
+Your keys are stored in the browser's `localStorage`. The OpenRouter key is
+sent to OpenRouter for chat/vision and fallback speech. The Google key is sent
+only to Google's native Gemini API for neural speech. For public deployment,
+move both credentials behind a server-side proxy.
 
 ## 📁 Project structure
 
