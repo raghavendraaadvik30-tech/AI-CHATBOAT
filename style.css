@@ -159,7 +159,9 @@ html, body {
   font-size: 20px; cursor: pointer; width: 38px; height: 38px;
   border-radius: 10px; transition: 0.2s;
 }
-.icon-btn:hover { background: rgba(255,255,255,0.08); color: var(--text); transform: rotate(45deg); }
+.icon-btn:hover { background: rgba(255,255,255,0.08); color: var(--text); }
+#settingsBtn:hover { transform: rotate(45deg); }
+.chat-head-actions { display: flex; align-items: center; gap: 4px; }
 
 .messages {
   flex: 1;

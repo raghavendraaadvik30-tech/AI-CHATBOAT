@@ -10,11 +10,18 @@ moves her **jaw and mouth** while she answers, powered by the
 
 ## ✨ Features
 
-- **Realistic 3D avatar** — a real human face scan (`facecap.glb`) with ARKit
-  blendshapes, lit with image-based lighting for lifelike skin. Natural
-  blinking, idle breathing / head-sway, and jaw + lip movement synced to
-  Aria's replies. (No Ready Player Me dependency — that service shut down in
+- **Realistic 3D avatar** — a real human face scan (`facecap.glb`) driven by
+  the full **ARKit 52-blendshape** set, lit with image-based lighting for
+  lifelike skin. (No Ready Player Me dependency — that service shut down in
   Jan 2026; assets load from the reliable jsDelivr CDN.)
+- **Real lip-sync + voice** — Aria **speaks replies aloud** (Web Speech API)
+  and her lips follow the words: text is converted to viseme mouth shapes and
+  timed to the actual speech, resyncing on word boundaries. Toggle voice with
+  the 🔊 button.
+- **Expressive face** — eyebrow raises, eye **saccades** (natural darting
+  gaze), blinking, cheek/nose/squint movement, head nods while talking, and an
+  **emotion** read from the reply (happy / curious / excited) that shapes the
+  brows and smile.
 - **Glassmorphism chat UI** — animated message bubbles, bouncing typing
   indicator, live status pill (Online / Thinking / Speaking).
 - **OpenRouter integration** — bring your own key and model.

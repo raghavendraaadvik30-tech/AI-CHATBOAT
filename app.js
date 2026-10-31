@@ -7,6 +7,7 @@
 const KEY_STORE = "aria.apiKey";
 const MODEL_STORE = "aria.model";
 const PERSONA_STORE = "aria.persona";
+const VOICE_STORE = "aria.voice";
 
 const DEFAULT_MODEL = "openai/gpt-4o-mini";
 const DEFAULT_PERSONA =
@@ -88,6 +89,20 @@ saveBtn.addEventListener("click", () => {
 });
 modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
 
+// ------------------------------------------------------------------ voice toggle
+const voiceBtn = el("voiceBtn");
+function applyVoice(on) {
+  window.ariaAvatar?.setVoice(on);
+  voiceBtn.textContent = on ? "🔊" : "🔇";
+  voiceBtn.title = on ? "Voice on — click to mute" : "Voice off — click to unmute";
+}
+voiceBtn.addEventListener("click", () => {
+  const currentlyOn = store.get(VOICE_STORE) !== "off"; // default on
+  const next = !currentlyOn;
+  store.set(VOICE_STORE, next ? "on" : "off");
+  applyVoice(next);
+});
+
 // ------------------------------------------------------------------ avatar fx
 // The 3D engine (avatar3d.js) owns blinking + idle motion. We only toggle
 // the talking state so the mouth syncs to replies.
@@ -166,8 +181,12 @@ async function askOpenRouter(userText) {
     history.push({ role: "assistant", content: reply });
 
     setStatus("Speaking…");
-    startTalking();
+    // Speak aloud + lip-sync (if the engine is ready) while the text reveals.
+    const spoken = window.ariaAvatar?.speak
+      ? window.ariaAvatar.speak(reply)
+      : (startTalking(), Promise.resolve());
     await typeOut(reply);
+    await spoken;            // wait for speech + lip-sync to finish
     stopTalking();
     setStatus("Online");
   } catch (err) {
@@ -210,6 +229,7 @@ composer.addEventListener("submit", (e) => {
 // ------------------------------------------------------------------ init
 function init() {
   try { loadSettings(); } catch (e) { /* storage blocked — handled by safe store */ }
+  applyVoice(store.get(VOICE_STORE) !== "off"); // default: voice on
   // greeting
   addMessage(
     "assistant",
