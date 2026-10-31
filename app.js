@@ -523,18 +523,33 @@ function extractImagePrompt(value) {
   const text = (value || "").trim();
   if (!text) return null;
 
+  const imageWord = "(?:images?|pictures?|photos?|artworks?|illustrations?|imeges?|imags?)";
   const slash = text.match(/^\/(?:image|img|ಚಿತ್ರ)\s+(.+)$/iu);
   if (slash) return slash[1].trim();
 
+  // Questions about an existing image/camera frame must stay in vision chat.
+  if (/^(?:what|who|where|why|how|describe|identify|recognize|recognise|count|tell\s+me\s+(?:about|what))\b/iu.test(text)) {
+    return null;
+  }
+
   const englishPatterns = [
-    /^(?:please\s+)?(?:can\s+you\s+|could\s+you\s+|would\s+you\s+)?(?:create|generate|make|draw|design)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|photo|artwork|illustration)\s*(?:of|showing|for)?\s+(.+)$/iu,
-    /^(?:please\s+)?show\s+me\s+(?:an?\s+)?(?:image|picture|photo|illustration)\s+(?:of|showing)\s+(.+)$/iu,
-    /^(?:i\s+want|give\s+me)\s+(?:an?\s+)?(?:image|picture|photo|illustration)\s+(?:of|showing)\s+(.+)$/iu,
+    new RegExp(`^(?:please\\s+)?(?:can\\s+you\\s+|could\\s+you\\s+|would\\s+you\\s+)?(?:create|generate|make|draw|design)\\s+(?:me\\s+)?(?:an?\\s+)?${imageWord}\\s*(?:of|showing|for)?\\s+(.+)$`, "iu"),
+    new RegExp(`^(?:please\\s+)?(?:create|generate|make|draw|design)\\s+(.+?)\\s+${imageWord}\\s*(?:please|plz)?[.!]*$`, "iu"),
+    new RegExp(`^(?:please\\s+)?show\\s+me\\s+(?:an?\\s+)?${imageWord}\\s+(?:of|showing)\\s+(.+)$`, "iu"),
+    new RegExp(`^(?:i\\s+want|give\\s+me)\\s+(?:an?\\s+)?${imageWord}\\s+(?:of|showing)\\s+(.+)$`, "iu"),
+    new RegExp(`^(?:an?\\s+)?${imageWord}\\s+(?:of|showing)\\s+(.+?)(?:\\s+(?:please|plz))?[.!]*$`, "iu"),
   ];
   for (const pattern of englishPatterns) {
     const match = text.match(pattern);
-    if (match?.[1]?.trim()) return match[1].trim();
+    if (match?.[1]?.trim()) return match[1].replace(/\s+(?:please|plz)[.!]*$/iu, "").trim();
   }
+
+  // Short subject-first requests: "tiger images", "Bengaluru photo plz".
+  const subjectFirst = text.match(new RegExp(`^(.+?)\\s+${imageWord}\\s*(?:please|plz)?[.!]*$`, "iu"));
+  if (subjectFirst?.[1]?.trim()) return subjectFirst[1].trim();
+
+  // Generic follow-up: "images plz" / the common misspelling "imeges plz".
+  if (new RegExp(`^${imageWord}\\s*(?:please|plz)?[.!]*$`, "iu").test(text)) return "";
 
   // Kannada requests commonly put the subject before "ಚಿತ್ರವನ್ನು ರಚಿಸಿ".
   const hasKannadaImageWord = /(?:ಚಿತ್ರ|ಚಿತ್ರವನ್ನು|ಚಿತ್ರವನ್ನೂ|ಫೋಟೋ|ಛಾಯಾಚಿತ್ರ|ಚಿತ್ರಣ)/u.test(text);
@@ -546,9 +561,24 @@ function extractImagePrompt(value) {
       .replace(/(?:ರಚಿಸು|ರಚಿಸಿ|ಸೃಷ್ಟಿಸು|ಸೃಷ್ಟಿಸಿ|ತಯಾರಿಸು|ತಯಾರಿಸಿ|ಮಾಡು|ಮಾಡಿ|ಬರೆಯು|ಬರೆಯಿರಿ)/gu, " ")
       .replace(/\s+/g, " ")
       .trim();
-    return cleaned || null;
+    return cleaned || "";
   }
 
+  return null;
+}
+
+function previousImageTopic() {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const message = history[i];
+    if (message.role !== "user" || typeof message.content !== "string") continue;
+    const routed = extractImagePrompt(message.content);
+    if (routed) return routed;
+    const fallback = message.content
+      .replace(/\b(?:please|plz|image|images|imege|imeges|picture|pictures|photo|photos)\b/giu, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (fallback) return fallback;
+  }
   return null;
 }
 
@@ -746,8 +776,13 @@ async function runTurn(text) {
   if (!value) return;
 
   const imagePrompt = extractImagePrompt(value);
-  if (imagePrompt) {
-    await generateImage(imagePrompt, value);
+  if (imagePrompt !== null) {
+    const resolvedPrompt = imagePrompt || previousImageTopic();
+    if (resolvedPrompt) await generateImage(resolvedPrompt, value);
+    else {
+      toast("Tell me what image you want, for example: generate an image of a tiger.", "error");
+      if (liveMode) scheduleListening(500, callSession);
+    }
     return;
   }
 
