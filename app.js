@@ -32,27 +32,60 @@ const personaInput = el("persona");
 // ---- conversation state ----
 let history = []; // {role, content}
 
+// ------------------------------------------------------------------ safe store
+// Some browsers throw a SecurityError when touching localStorage on a file://
+// page (or when storage is disabled). Fall back to an in-memory store so the
+// app never crashes — settings just won't persist across reloads in that case.
+const memStore = {};
+let storageWorks = true;
+const store = {
+  get(k) {
+    try { return localStorage.getItem(k); }
+    catch { storageWorks = false; return k in memStore ? memStore[k] : null; }
+  },
+  set(k, v) {
+    try { localStorage.setItem(k, v); }
+    catch { storageWorks = false; memStore[k] = v; }
+  },
+};
+
 // ------------------------------------------------------------------ settings
 function loadSettings() {
-  apiKeyInput.value = localStorage.getItem(KEY_STORE) || "";
-  modelInput.value = localStorage.getItem(MODEL_STORE) || DEFAULT_MODEL;
-  personaInput.value = localStorage.getItem(PERSONA_STORE) || DEFAULT_PERSONA;
+  apiKeyInput.value = store.get(KEY_STORE) || "";
+  modelInput.value = store.get(MODEL_STORE) || DEFAULT_MODEL;
+  personaInput.value = store.get(PERSONA_STORE) || DEFAULT_PERSONA;
 }
-function getKey() { return localStorage.getItem(KEY_STORE) || ""; }
-function getModel() { return localStorage.getItem(MODEL_STORE) || DEFAULT_MODEL; }
-function getPersona() { return localStorage.getItem(PERSONA_STORE) || DEFAULT_PERSONA; }
+function getKey() { return store.get(KEY_STORE) || ""; }
+function getModel() { return store.get(MODEL_STORE) || DEFAULT_MODEL; }
+function getPersona() { return store.get(PERSONA_STORE) || DEFAULT_PERSONA; }
 
 function openModal() { loadSettings(); modal.hidden = false; }
 function closeModal() { modal.hidden = true; }
 
 el("settingsBtn").addEventListener("click", openModal);
 el("closeModal").addEventListener("click", closeModal);
-el("saveSettings").addEventListener("click", () => {
-  localStorage.setItem(KEY_STORE, apiKeyInput.value.trim());
-  localStorage.setItem(MODEL_STORE, modelInput.value.trim() || DEFAULT_MODEL);
-  localStorage.setItem(PERSONA_STORE, personaInput.value.trim() || DEFAULT_PERSONA);
-  closeModal();
-  setStatus("Online");
+
+const saveBtn = el("saveSettings");
+saveBtn.addEventListener("click", () => {
+  // Never let an exception stop the modal from closing or feedback from showing.
+  store.set(KEY_STORE, apiKeyInput.value.trim());
+  store.set(MODEL_STORE, modelInput.value.trim() || DEFAULT_MODEL);
+  store.set(PERSONA_STORE, personaInput.value.trim() || DEFAULT_PERSONA);
+
+  const original = saveBtn.textContent;
+  saveBtn.textContent = "Saved ✓";
+  setTimeout(() => {
+    saveBtn.textContent = original;
+    closeModal();
+    setStatus("Online");
+    if (!storageWorks) {
+      addMessage(
+        "assistant",
+        "Heads up: your browser is blocking saved settings (this happens when the page is opened as a file://). " +
+        "Your key works for this session, but to make it persist, run the app from a local web server — e.g. `python3 -m http.server` then open http://localhost:8000."
+      );
+    }
+  }, 550);
 });
 modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
 
@@ -89,6 +122,13 @@ function showTyping(on) {
   if (on) messagesBox.scrollTop = messagesBox.scrollHeight;
 }
 
+// On a file:// page, location.origin is the string "null", which OpenRouter
+// rejects as a Referer. Fall back to a valid URL in that case.
+function referer() {
+  const o = location.origin;
+  return o && o !== "null" ? o : "https://aria-avatar-chat.local";
+}
+
 // ------------------------------------------------------------------ API call
 async function askOpenRouter(userText) {
   const key = getKey();
@@ -114,7 +154,7 @@ async function askOpenRouter(userText) {
       headers: {
         "Content-Type": "application/json",
         Authorization: "Bearer " + key,
-        "HTTP-Referer": location.origin,
+        "HTTP-Referer": referer(),
         "X-Title": "Aria Avatar Chat",
       },
       body: JSON.stringify(payload),
@@ -177,7 +217,7 @@ composer.addEventListener("submit", (e) => {
 
 // ------------------------------------------------------------------ init
 function init() {
-  loadSettings();
+  try { loadSettings(); } catch (e) { /* storage blocked — handled by safe store */ }
   scheduleBlink();
   // greeting
   addMessage(
