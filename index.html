@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=6" />
+  <link rel="stylesheet" href="style.css?v=8" />
 
   <!-- Three.js via import map (jsDelivr: reliable CORS + binary assets) -->
   <script type="importmap">
@@ -113,7 +113,7 @@
       <label class="field">
         <span>Stability AI API key</span>
         <input id="stabilityApiKey" type="password" placeholder="sk-…" autocomplete="off" />
-        <small>Used only for image generation through Stability AI. Never committed to the repository.</small>
+        <small>Optional browser fallback. Recommended: run the Node proxy with STABILITY_API_KEY so the key stays server-side and CORS cannot block generation.</small>
       </label>
       <label class="field">
         <span>Model</span>
@@ -184,7 +184,7 @@
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
   <!-- 3D avatar engine, followed by app coordinator -->
-  <script type="module" src="avatar3d.js?v=6"></script>
-  <script type="module" src="app.js?v=7"></script>
+  <script type="module" src="avatar3d.js?v=8"></script>
+  <script type="module" src="app.js?v=8"></script>
 </body>
 </html>

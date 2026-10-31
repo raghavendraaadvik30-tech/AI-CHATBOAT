@@ -395,6 +395,7 @@ window.addEventListener("pagehide", stopCamera);
 
 // ------------------------------------------------------------------ Stability AI image generation
 const generatedImageUrls = new Set();
+let imageGenerationSequence = 0;
 
 function createImageCard(prompt) {
   el("emptyHint")?.remove();
@@ -407,7 +408,7 @@ function createImageCard(prompt) {
   spinner.className = "image-spinner";
   const state = document.createElement("span");
   state.className = "image-card-state";
-  state.textContent = "Generating image…";
+  state.textContent = "Starting image generation…";
   preview.append(spinner, state);
 
   const caption = document.createElement("p");
@@ -418,25 +419,133 @@ function createImageCard(prompt) {
   actions.className = "image-card-actions";
   const cancel = document.createElement("button");
   cancel.type = "button";
-  cancel.className = "image-card-button";
+  cancel.className = "image-card-button danger";
   cancel.textContent = "Cancel";
   actions.appendChild(cancel);
 
   card.append(preview, caption, actions);
   messagesBox.appendChild(card);
   messagesBox.scrollTop = messagesBox.scrollHeight;
-  return { card, preview, state, actions, cancel };
+  return { card, preview, spinner, state, actions, cancel };
+}
+
+function showImageTerminal(generation, label, failed = false) {
+  const { ui } = generation;
+  ui.card.classList.remove("generating");
+  ui.card.classList.toggle("failed", failed);
+  ui.preview.replaceChildren();
+  ui.state.textContent = label;
+  ui.preview.appendChild(ui.state);
+  ui.actions.replaceChildren();
+}
+
+function releaseImageGeneration(generation) {
+  clearTimeout(generation.timeoutId);
+  clearInterval(generation.elapsedId);
+  if (activeImageGeneration !== generation) return;
+  activeImageGeneration = null;
+  imageBtn.disabled = false;
+  imageBtn.classList.remove("generating");
+  if (liveMode) scheduleListening(500, callSession);
+}
+
+function cancelImageGeneration(generation, timedOut = false) {
+  if (generation.terminal) return;
+  generation.terminal = true;
+  generation.cancelled = !timedOut;
+  generation.timedOut = timedOut;
+  generation.ui.cancel.disabled = true;
+  generation.controller.abort(timedOut ? "timeout" : "cancelled");
+  if (generation.objectUrl) {
+    URL.revokeObjectURL(generation.objectUrl);
+    generatedImageUrls.delete(generation.objectUrl);
+    generation.objectUrl = null;
+  }
+  showImageTerminal(generation, timedOut ? "Image generation timed out" : "Generation cancelled", true);
+  if (timedOut) toast("Image generation timed out. Try Stable Image Core or a shorter prompt.", "error", 8000);
+  releaseImageGeneration(generation);
+}
+
+function assertGenerationActive(generation) {
+  if (generation.cancelled || generation.timedOut || generation.controller.signal.aborted || generation.terminal) {
+    throw new DOMException("Cancelled", "AbortError");
+  }
+}
+
+async function requestImageViaProxy(prompt, engine, aspectRatio, generation) {
+  if (location.protocol === "file:") return null;
+  const response = await fetch("/api/stability/generate", {
+    method: "POST",
+    signal: generation.controller.signal,
+    headers: { "Content-Type": "application/json", Accept: "image/*, application/json" },
+    body: JSON.stringify({ prompt, engine, aspectRatio }),
+  });
+  if (response.ok) return response.blob();
+
+  let body = {};
+  try { body = await response.json(); } catch {}
+  const unavailable = response.status === 404 || response.status === 405 || response.status === 501
+    || (response.status === 503 && body.code === "image_proxy_unconfigured");
+  if (unavailable) return null;
+  throw new Error(`Image proxy ${response.status}: ${body.detail || body.error || "request failed"}`);
+}
+
+async function requestImageDirect(prompt, engine, aspectRatio, generation) {
+  const key = getStabilityKey();
+  if (!key) {
+    const error = new Error("Configure STABILITY_API_KEY on the Node server or add a Stability key in Settings.");
+    error.code = "missing_stability_key";
+    throw error;
+  }
+  const form = new FormData();
+  form.append("prompt", prompt);
+  form.append("aspect_ratio", aspectRatio);
+  form.append("output_format", "webp");
+
+  try {
+    const response = await fetch(`https://api.stability.ai/v2beta/stable-image/generate/${engine}`, {
+      method: "POST",
+      signal: generation.controller.signal,
+      headers: { Authorization: `Bearer ${key}`, Accept: "image/*" },
+      body: form,
+    });
+    if (!response.ok) {
+      const detail = (await response.text()).slice(0, 240);
+      throw new Error(`Stability AI ${response.status}: ${detail}`);
+    }
+    return response.blob();
+  } catch (error) {
+    if (error?.name === "TypeError") {
+      throw new Error("Direct Stability request was blocked by the network or browser CORS. Run `npm start` with STABILITY_API_KEY to use the same-origin proxy.");
+    }
+    throw error;
+  }
+}
+
+async function requestGeneratedImage(prompt, engine, aspectRatio, generation) {
+  generation.ui.state.textContent = "Connecting to image service…";
+  const proxied = await requestImageViaProxy(prompt, engine, aspectRatio, generation);
+  assertGenerationActive(generation);
+  if (proxied) return proxied;
+  generation.ui.state.textContent = "Generating through Stability AI…";
+  return requestImageDirect(prompt, engine, aspectRatio, generation);
+}
+
+function decodeGeneratedImage(image, generation) {
+  return new Promise((resolve, reject) => {
+    const decodeTimeout = setTimeout(() => reject(new Error("Generated image could not be decoded in time.")), 12_000);
+    const abort = () => reject(new DOMException("Cancelled", "AbortError"));
+    generation.controller.signal.addEventListener("abort", abort, { once: true });
+    image.decode().then(resolve, reject).finally(() => {
+      clearTimeout(decodeTimeout);
+      generation.controller.signal.removeEventListener("abort", abort);
+    });
+  });
 }
 
 async function generateImage(prompt, displayedRequest = prompt) {
   const text = (prompt || "").trim();
   if (!text) { toast("Enter an image prompt first.", "error"); return; }
-  if (!getStabilityKey()) {
-    if (liveMode) stopLive();
-    openModal();
-    toast("Add your Stability AI API key first.", "error");
-    return;
-  }
   if (activeImageGeneration || activeTurn) {
     toast("Wait for the current generation or response to finish.", "error");
     return;
@@ -444,76 +553,84 @@ async function generateImage(prompt, displayedRequest = prompt) {
 
   stopRecognition(true);
   setPhase("idle");
-  const controller = new AbortController();
-  activeImageGeneration = { controller };
-  imageBtn.disabled = true;
-  imageBtn.classList.add("generating");
   addMessage("user", `${displayedRequest}  🎨`);
   input.value = "";
-  const ui = createImageCard(text);
-  ui.cancel.addEventListener("click", () => controller.abort(), { once: true });
 
   const engine = getImageEngine() === "ultra" ? "ultra" : "core";
-  const form = new FormData();
-  form.append("prompt", text);
-  form.append("aspect_ratio", getImageAspect());
-  form.append("output_format", "webp");
+  const generation = {
+    id: ++imageGenerationSequence,
+    controller: new AbortController(),
+    cancelled: false,
+    timedOut: false,
+    terminal: false,
+    objectUrl: null,
+    timeoutId: null,
+    elapsedId: null,
+    ui: createImageCard(text),
+  };
+  activeImageGeneration = generation;
+  imageBtn.disabled = true;
+  imageBtn.classList.add("generating");
+
+  const startedAt = Date.now();
+  const timeoutMs = engine === "ultra" ? 180_000 : 120_000;
+  generation.timeoutId = setTimeout(() => cancelImageGeneration(generation, true), timeoutMs);
+  generation.elapsedId = setInterval(() => {
+    if (!generation.terminal) {
+      const seconds = Math.floor((Date.now() - startedAt) / 1000);
+      generation.ui.state.textContent = `Generating image… ${seconds}s`;
+    }
+  }, 1000);
+  generation.ui.cancel.addEventListener("click", () => cancelImageGeneration(generation, false), { once: true });
 
   try {
-    const response = await fetch(`https://api.stability.ai/v2beta/stable-image/generate/${engine}`, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        Authorization: `Bearer ${getStabilityKey()}`,
-        Accept: "image/*",
-      },
-      body: form,
-    });
-    if (!response.ok) {
-      const detail = await response.text();
-      throw new Error(`Stability AI ${response.status}: ${detail.slice(0, 240)}`);
-    }
+    const blob = await requestGeneratedImage(text, engine, getImageAspect(), generation);
+    assertGenerationActive(generation);
+    if (!blob.type.startsWith("image/")) throw new Error("Image service returned an unsupported response.");
+    if (blob.size > 20 * 1024 * 1024) throw new Error("Generated image is larger than the 20 MB safety limit.");
 
-    const blob = await response.blob();
-    if (!blob.type.startsWith("image/")) throw new Error("Stability AI returned an unsupported response.");
     const url = URL.createObjectURL(blob);
-    generatedImageUrls.add(url);
-
+    generation.objectUrl = url;
     const image = document.createElement("img");
     image.src = url;
     image.alt = text;
-    image.loading = "lazy";
-    await image.decode().catch(() => {});
-    ui.preview.replaceChildren(image);
-    ui.card.classList.remove("generating");
-    ui.card.classList.add("ready");
-    ui.actions.replaceChildren();
+    await decodeGeneratedImage(image, generation);
+    assertGenerationActive(generation);
+
+    generatedImageUrls.add(url);
+    generation.terminal = true;
+    generation.ui.preview.replaceChildren(image);
+    generation.ui.card.classList.remove("generating", "failed");
+    generation.ui.card.classList.add("ready");
+    generation.ui.actions.replaceChildren();
 
     const download = document.createElement("a");
     download.className = "image-card-button primary";
     download.href = url;
     download.download = `aria-${Date.now()}.webp`;
     download.textContent = "Download";
-    ui.actions.appendChild(download);
+    generation.ui.actions.appendChild(download);
   } catch (error) {
-    ui.card.classList.remove("generating");
-    ui.card.classList.add("failed");
-    ui.preview.replaceChildren();
-    ui.state.textContent = error?.name === "AbortError" ? "Generation cancelled" : "Image generation failed";
-    ui.preview.appendChild(ui.state);
-    ui.actions.replaceChildren();
-    if (error?.name !== "AbortError") toast(error.message || "Image generation failed.", "error", 10000);
+    if (!generation.terminal) {
+      generation.terminal = true;
+      if (generation.objectUrl) {
+        URL.revokeObjectURL(generation.objectUrl);
+        generatedImageUrls.delete(generation.objectUrl);
+        generation.objectUrl = null;
+      }
+      showImageTerminal(generation, "Image generation failed", true);
+      if (error?.code === "missing_stability_key") openModal();
+      if (error?.name !== "AbortError") toast(error.message || "Image generation failed.", "error", 10000);
+    }
   } finally {
-    activeImageGeneration = null;
-    imageBtn.disabled = false;
-    imageBtn.classList.remove("generating");
-    if (liveMode) scheduleListening(500, callSession);
+    releaseImageGeneration(generation);
   }
 }
 
 imageBtn.addEventListener("click", () => generateImage(input.value));
 window.addEventListener("pagehide", () => {
-  activeImageGeneration?.controller.abort();
+  liveMode = false;
+  if (activeImageGeneration) cancelImageGeneration(activeImageGeneration, false);
   generatedImageUrls.forEach((url) => URL.revokeObjectURL(url));
   generatedImageUrls.clear();
 });

@@ -10,3 +10,7 @@ node_modules/
 
 # Kiro tooling artifacts
 .kiro/
+
+# local secrets
+.env
+.env.*

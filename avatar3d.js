@@ -118,12 +118,17 @@ let charsPerMs = 0.05, anchorTime = 0, anchorChar = 0, lastBoundaryChar = -1, la
 
 let gazeX = 0, gazeY = 0, gazeTX = 0, gazeTY = 0, nextGaze = 1.5;
 let sacX = 0, sacY = 0;
+let headPX = 0, headPY = 0;
 let nextBlink = 1.2, blinkT = -1, blink = 0;
+let blinkProfile = { close: 0.075, hold: 0.025, open: 0.14, left: 1, right: 0.97 };
+let doubleBlinkPending = false;
+let followUpBlink = false;
 let browT = -1, nextBrow = 3;
 let nod = 0;
 let gestureNod = 0, gestureTilt = 0, gestureBrow = 0;
+let lastSpeechGestureAt = 0;
 let boundaryCount = 0;
-let emotionGain = 0;
+let emotionGain = 0, emotionTarget = 0;
 let thinking = false, listening = false;
 let microSmile = 0, nextSmile = 6;
 
@@ -233,7 +238,7 @@ function estDuration(text) {
 
 // -------------------------------------------------------------- expression
 function setEmotionFromText(text) {
-  emotionGain = 1;
+  emotionTarget = 1;
   const ex = (text.match(/!/g) || []).length;
   const q = (text.match(/\?/g) || []).length;
   const smiley = /(:\)|:D|😊|😄|😀|🙂|😁|❤|😍|🎉|😎)/.test(text);
@@ -268,14 +273,15 @@ function startSpeechSync(seq, dur) {
 function onBoundary(charIndex) {
   const now = performance.now();
   boundaryCount++;
-  // Small phrase beats make speech feel intentional without puppet-like
-  // constant nodding. Eyes move first, then the head follows.
-  if (boundaryCount % 3 === 0) gestureNod = Math.min(1, gestureNod + 0.75);
-  if (boundaryCount % 5 === 0) gestureTilt = (boundaryCount % 10 === 0 ? -1 : 1) * 0.55;
-  if (boundaryCount % 4 === 0) gestureBrow = 0.55;
-  if (boundaryCount % 3 === 0) {
-    sacX = (Math.random() * 2 - 1) * 0.16;
-    sacY = (Math.random() * 2 - 1) * 0.1;
+  // Non-rhythmic phrase gestures: one restrained gesture at most every 550ms.
+  if (now - lastSpeechGestureAt > 550 && Math.random() < 0.48) {
+    lastSpeechGestureAt = now;
+    const choice = Math.random();
+    if (choice < 0.48) gestureNod = Math.min(1, gestureNod + 0.65);
+    else if (choice < 0.76) gestureTilt = (Math.random() < 0.5 ? -1 : 1) * 0.42;
+    else gestureBrow = 0.48;
+    sacX = (Math.random() * 2 - 1) * 0.12;
+    sacY = (Math.random() * 2 - 1) * 0.075;
   }
   if (lastBoundaryTime && charIndex > lastBoundaryChar) {
     const elapsed = now - lastBoundaryTime;
@@ -287,7 +293,12 @@ function onBoundary(charIndex) {
   anchorChar = charIndex;
   anchorTime = now;
 }
-function stopSpeechSync() { speechActive = false; seqG = null; currentViseme = null; }
+function stopSpeechSync() {
+  speechActive = false;
+  seqG = null;
+  currentViseme = null;
+  emotionTarget = 0;
+}
 
 // -------------------------------------------------------------- voices
 let voices = [];
@@ -606,6 +617,18 @@ function applyGaze() {
   else { setTExact("eyeLookDown_L", -gazeY * 0.5); setTExact("eyeLookDown_R", -gazeY * 0.5); }
 }
 
+function beginBlink(isFollowUp = false) {
+  blinkProfile = {
+    close: 0.065 + Math.random() * 0.025,
+    hold: 0.018 + Math.random() * 0.025,
+    open: 0.12 + Math.random() * 0.055,
+    left: 0.94 + Math.random() * 0.06,
+    right: 0.94 + Math.random() * 0.06,
+  };
+  blinkT = 0;
+  doubleBlinkPending = isFollowUp ? false : Math.random() < 0.14;
+}
+
 const MANAGED = [
   "eyeBlink_L", "eyeBlink_R", "browInnerUp", "browOuterUp_L", "browOuterUp_R",
   "browDown_L", "browDown_R", "mouthSmile_L", "mouthSmile_R", "mouthFrown_L", "mouthFrown_R",
@@ -624,8 +647,10 @@ function animate() {
   if (influences) {
     for (const n of MANAGED) setTExact(n, 0);
 
-    // emotion / resting expression with a natural post-speech decay
-    if (!talking) emotionGain = Math.max(0, emotionGain - dt * 0.22);
+    // expression envelope: quick human-like engagement, slower relaxed release
+    const affectTarget = talking ? emotionTarget : 0;
+    const affectSpeed = affectTarget > emotionGain ? 5.5 : 1.35;
+    emotionGain += (affectTarget - emotionGain) * Math.min(1, dt * affectSpeed);
     for (const [k, v] of Object.entries(emotion)) setT(k, v * emotionGain);
     setT("browInnerUp", 0.05 + 0.03 * Math.sin(t * 0.7));
 
@@ -650,16 +675,32 @@ function animate() {
     setT("mouthSmile_L", sm); setT("mouthSmile_R", sm);
     setT("cheekSquint_L", sm * 0.6); setT("cheekSquint_R", sm * 0.6);
 
-    // blink timing
+    // staged blink: fast close, tiny hold, slower opening, slight asymmetry
     nextBlink -= dt;
-    if (blinkT < 0 && nextBlink <= 0) { blinkT = 0; nextBlink = 2 + Math.random() * 4; }
+    if (blinkT < 0 && nextBlink <= 0) {
+      beginBlink(followUpBlink);
+      followUpBlink = false;
+    }
     blink = 0;
     if (blinkT >= 0) {
       blinkT += dt;
-      const dur = 0.18;
-      blink = blinkT < dur / 2 ? blinkT / (dur / 2) : 1 - (blinkT - dur / 2) / (dur / 2);
-      blink = Math.max(0, Math.min(1, blink));
-      if (blinkT >= dur) blinkT = -1;
+      const closeEnd = blinkProfile.close;
+      const holdEnd = closeEnd + blinkProfile.hold;
+      const end = holdEnd + blinkProfile.open;
+      if (blinkT < closeEnd) blink = THREE.MathUtils.smoothstep(blinkT / closeEnd, 0, 1);
+      else if (blinkT < holdEnd) blink = 1;
+      else blink = 1 - THREE.MathUtils.smoothstep((blinkT - holdEnd) / blinkProfile.open, 0, 1);
+      blink = THREE.MathUtils.clamp(blink, 0, 1);
+      if (blinkT >= end) {
+        blinkT = -1;
+        if (doubleBlinkPending) {
+          doubleBlinkPending = false;
+          followUpBlink = true;
+          nextBlink = 0.11 + Math.random() * 0.07;
+        } else {
+          nextBlink = (listening ? 3.2 : 2.2) + Math.random() * 4.2;
+        }
+      }
     }
 
     // spontaneous brow raise
@@ -675,9 +716,12 @@ function animate() {
     // gaze: track the pointer, plus small saccade jitter for life
     nextGaze -= dt;
     if (nextGaze <= 0) {
+      const previousX = sacX, previousY = sacY;
       sacX = (Math.random() * 2 - 1) * 0.22;
       sacY = (Math.random() * 2 - 1) * 0.16;
-      nextGaze = 0.7 + Math.random() * 2.2;
+      const relocation = Math.hypot(sacX - previousX, sacY - previousY);
+      if (relocation > 0.22 && Math.random() < 0.42) nextBlink = Math.min(nextBlink, 0.12);
+      nextGaze = 0.9 + Math.random() * 3.1;
     }
     gazeTX = Math.max(-1, Math.min(1, px * 0.7 + sacX));
     gazeTY = Math.max(-1, Math.min(1, py * 0.5 + sacY));
@@ -733,13 +777,16 @@ function animate() {
 
     // crisp blink: write directly so the 0.18s pulse is fully visible
     const bL = idx("eyeBlink_L"), bR = idx("eyeBlink_R");
-    if (bL >= 0) influences[bL] = blink;
-    if (bR >= 0) influences[bR] = blink;
+    if (bL >= 0) influences[bL] = blink * blinkProfile.left;
+    if (bR >= 0) influences[bR] = blink * blinkProfile.right;
   }
 
   // smooth pointer
   px += (tpx - px) * Math.min(1, dt * 3.5);
   py += (tpy - py) * Math.min(1, dt * 3.5);
+  // Eyes lead; the head follows more slowly and with a smaller range.
+  headPX += (px - headPX) * Math.min(1, dt * 1.35);
+  headPY += (py - headPY) * Math.min(1, dt * 1.2);
 
   // Head gestures are event-driven by speech boundaries. This avoids the
   // mechanical constant nod that made the previous animation look robotic.
@@ -751,10 +798,10 @@ function animate() {
     const nodBeat = Math.sin(gestureNod * Math.PI) * 0.055;
     const idleY = 0.026 * Math.sin(t * 0.43) + 0.012 * Math.sin(t * 0.19 + 1);
     const idleX = 0.018 * Math.sin(t * 0.51 + 1) + 0.008 * Math.sin(t * 0.21);
-    faceRoot.rotation.y = baseRot.y + idleY + px * 0.13 + gestureTilt * 0.045;
-    faceRoot.rotation.x = baseRot.x + idleX + py * 0.075 + nodBeat;
+    faceRoot.rotation.y = baseRot.y + idleY + headPX * 0.11 + gestureTilt * 0.045;
+    faceRoot.rotation.x = baseRot.x + idleX + headPY * 0.06 + nodBeat;
     const attentiveTilt = (listening && !talking ? 0.065 : 0) + (thinking && !talking ? 0.035 : 0);
-    faceRoot.rotation.z = baseRot.z + 0.008 * Math.sin(t * 0.36) - px * 0.018 + attentiveTilt + gestureTilt * 0.018;
+    faceRoot.rotation.z = baseRot.z + 0.008 * Math.sin(t * 0.36) - headPX * 0.014 + attentiveTilt + gestureTilt * 0.018;
     faceRoot.position.y = basePos.y + 0.003 * Math.sin(t * 1.05);
   }
 

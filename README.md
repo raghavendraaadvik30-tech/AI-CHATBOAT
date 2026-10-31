@@ -29,17 +29,20 @@ moves her **jaw and mouth** while she answers, powered by the
   image of a tiger”, “show me a picture of Bengaluru”, `/image ...`, or
   “ಬೆಂಗಳೂರಿನ ಚಿತ್ರವನ್ನು ರಚಿಸಿ” route directly to Stability AI. Questions about
   camera images continue to use vision chat instead of generating new images.
-- **Stability AI image generation** — enter a Stability key and choose Stable
-  Image Core or Ultra plus an aspect ratio. Generated WebP images appear as
-  dedicated cards with cancellation and download controls.
+- **Stability AI image generation** — use Stable Image Core or Ultra with
+  configurable aspect ratios. The Node server proxy avoids browser CORS and
+  keeps the key server-side. Every request has a deadline, live elapsed time,
+  immediate cancellation (including decode), response-size checks, and a
+  downloadable WebP result.
 - **Vision (camera)** — tap 📷 to share your webcam. A live preview appears over
   the avatar. Each turn can include two chronological frames, allowing Aria to
   inspect static details (fingers, shirt colour, objects) and simple visible
   gestures. Requires a vision-capable model.
-- **Expressive face** — eyebrow raises, eye **saccades** (natural darting
-  gaze), blinking, cheek/nose/squint movement, head nods while talking, and an
-  **emotion** read from the reply (happy / curious / excited) that shapes the
-  brows and smile.
+- **Expressive face** — staged asymmetric blinks, occasional double blinks,
+  gaze-linked blinking, eyes that lead slower head turns, smooth expression
+  attack/release, cheek/nose/squint movement, and non-rhythmic phrase gestures.
+  The included asset is a head-only ARKit rig; anatomically correct arm, hand,
+  shoulder, and full-body gestures require a different licensed model.
 - **Glassmorphism chat UI** — animated message bubbles, bouncing typing
   indicator, live status pill (Online / Thinking / Speaking).
 - **OpenRouter integration** — bring your own key and model.
@@ -48,7 +51,12 @@ moves her **jaw and mouth** while she answers, powered by the
 
 ## 🚀 Getting started
 
-1. Serve the project: `python3 -m http.server 8000`.
+1. Use Node 18 or newer. Export a rotated Stability key and start the included
+   same-origin proxy:
+   ```bash
+   export STABILITY_API_KEY="your-rotated-key"
+   npm start
+   ```
 2. Open `http://localhost:8000` in Chrome or Edge.
 3. Click **⚙ settings** and add the provider keys you use: OpenRouter for
    chat/vision, Google for primary Kannada speech, and Stability AI for image
@@ -69,23 +77,24 @@ all provider credentials behind a server-side proxy.
 ├── index.html    # markup, import map, 3D canvas + chat UI
 ├── style.css     # theme, layout, animations
 ├── avatar3d.js   # Three.js engine: loads the face, blink/breathe/talk
-├── app.js        # chat logic + OpenRouter client
+├── server.mjs    # static server + secure Stability image proxy
+├── package.json  # dependency-free npm start command
+├── app.js        # chat, live-call, provider and image-generation coordinator
 └── README.md
 ```
 
 > **Note:** the 3D avatar loads Three.js and the face model from a CDN, so an
-> internet connection is required on first load. Run it from a local web server
-> (modules + CDN won't work reliably from a `file://` page):
->
-> ```bash
-> python3 -m http.server 8000   # then open http://localhost:8000
-> ```
+> internet connection is required. `npm start` is recommended because it also
+> enables the same-origin image proxy. `python3 -m http.server 8000` still runs
+> the client, but Stability generation then depends on the optional browser key
+> and the provider's CORS policy.
 
 ## ⚠️ Security note
 
-This is a **client-side only** app, so the API key lives in the browser. That's
-fine for local/personal use. If you deploy it publicly, add a small backend
-proxy that keeps the key server-side — never ship a real key in client code.
+The Node proxy keeps `STABILITY_API_KEY` server-side. Other provider keys are
+still stored in browser `localStorage` for this local/personal demo. Before a
+public deployment, proxy OpenRouter and Google too, then add authentication and
+rate limiting.
 
 ## 🛠️ Customise
 

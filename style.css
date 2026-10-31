@@ -370,6 +370,9 @@ body[data-phase="speaking"] .voice-wave span:nth-child(5) { animation-delay: -.1
   cursor: pointer;
 }
 .image-card-button.primary { border: 0; background: linear-gradient(135deg, var(--accent), #6d28d9); }
+.image-card-button.danger { border-color: rgba(255,93,125,.5); color: #ffb7c5; }
+.image-card-button.danger:hover { background: rgba(255,93,125,.14); color: #fff; }
+.image-card-button:disabled { opacity: .45; cursor: not-allowed; }
 .image-card.failed { border-color: rgba(255,93,125,.45); }
 .image-card.failed .image-card-preview { min-height: 110px; color: #ffb4c3; }
 
