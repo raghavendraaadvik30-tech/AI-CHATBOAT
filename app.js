@@ -101,6 +101,7 @@ voiceBtn.addEventListener("click", () => {
   const next = !currentlyOn;
   store.set(VOICE_STORE, next ? "on" : "off");
   applyVoice(next);
+  if (next) window.ariaAvatar?.primeVoice?.(); // unlock audio on this gesture
 });
 
 // ------------------------------------------------------------------ avatar fx
@@ -226,6 +227,8 @@ function sendText(text) {
 }
 composer.addEventListener("submit", (e) => {
   e.preventDefault();
+  // Unlock speech synthesis while we still have the click's user activation.
+  window.ariaAvatar?.primeVoice?.();
   sendText(input.value);
 });
 
@@ -277,7 +280,10 @@ if (SR) {
   };
   recog.onend = () => { input.placeholder = "Say something to Aria…"; stopListening(); };
 
-  micBtn.addEventListener("click", () => { listening ? stopListening() : startListening(); });
+  micBtn.addEventListener("click", () => {
+    window.ariaAvatar?.primeVoice?.();
+    listening ? stopListening() : startListening();
+  });
 } else {
   // No speech recognition support (e.g. Firefox) — hide the mic button.
   micBtn.style.display = "none";

@@ -64,6 +64,7 @@ let currentViseme = null;
 let mouthGain = 0;
 let emotion = {};
 let schedTimer = null, speakTimeout = null, cursor = 0;
+let primed = false, keepAlive = null;
 
 let gazeX = 0, gazeY = 0, gazeTX = 0, gazeTY = 0, nextGaze = 1.5;
 let nextBlink = 1.2, blinkT = -1, blink = 0;
@@ -185,8 +186,29 @@ function pickVoice() {
 }
 
 // -------------------------------------------------------------- speak
+// Unlock speech during a real user gesture. Browsers (esp. Chrome/Safari)
+// often refuse to speak later — after an async fetch — unless synthesis was
+// kicked off from a genuine interaction first. Call this from a click.
+function primeVoice() {
+  const ss = window.speechSynthesis;
+  if (!ss || !window.SpeechSynthesisUtterance) return;
+  try {
+    ss.resume();
+    refreshVoices();
+    if (!primed) {
+      const u = new SpeechSynthesisUtterance(" ");
+      u.volume = 0; // silent warm-up
+      ss.speak(u);
+      primed = true;
+    }
+  } catch {}
+}
+
+function stopKeepAlive() { if (keepAlive) { clearInterval(keepAlive); keepAlive = null; } }
+
 function cancelSpeak() {
   stopScheduler();
+  stopKeepAlive();
   if (speakTimeout) { clearTimeout(speakTimeout); speakTimeout = null; }
   try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
   talking = false; currentViseme = null;
@@ -197,28 +219,40 @@ function speak(text) {
   const seq = buildVisemeSeq(text);
   setEmotionFromText(text);
   const dur = estDuration(text);
+  const ss = window.speechSynthesis;
+
   return new Promise((resolve) => {
     let done = false;
     const finish = () => {
       if (done) return; done = true;
-      stopScheduler();
+      stopScheduler(); stopKeepAlive();
       if (speakTimeout) { clearTimeout(speakTimeout); speakTimeout = null; }
       talking = false; currentViseme = null;
       resolve();
     };
-    const canSpeak = voiceOn && window.speechSynthesis && window.SpeechSynthesisUtterance;
+
+    const canSpeak = voiceOn && ss && window.SpeechSynthesisUtterance;
+    // Always drive the mouth immediately so lips move even if audio lags/fails.
+    talking = true;
+    startScheduler(seq, dur);
+
     if (canSpeak) {
       const u = new SpeechSynthesisUtterance(cleanForSpeech(text) || " ");
       const v = pickVoice(); if (v) u.voice = v;
       u.rate = 1.0; u.pitch = 1.15; u.volume = 1.0;
-      u.onstart = () => { talking = true; startScheduler(seq, dur); };
+      u.onstart = () => { talking = true; if (!schedTimer) startScheduler(seq, dur); };
       u.onboundary = (e) => { if (typeof e.charIndex === "number") resyncCursor(seq, e.charIndex); };
-      u.onend = finish; u.onerror = finish;
-      try { window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); }
-      catch { talking = true; startScheduler(seq, dur); }
-      speakTimeout = setTimeout(finish, dur + 6000);
+      u.onend = finish;
+      u.onerror = finish;
+      try {
+        ss.resume();              // clear any paused state
+        ss.speak(u);
+        // Chrome goes silent on long utterances (~15s) — nudge it awake.
+        keepAlive = setInterval(() => { try { ss.pause(); ss.resume(); } catch {} }, 9000);
+      } catch { /* mouth still animates via scheduler */ }
+      // safety net if onend/onerror never fire (known Chrome quirk)
+      speakTimeout = setTimeout(finish, dur + 8000);
     } else {
-      talking = true; startScheduler(seq, dur);
       speakTimeout = setTimeout(finish, dur);
     }
   });
@@ -397,8 +431,10 @@ renderer.setAnimationLoop(animate);
 // ---------------------------------------------------------------- public API
 window.ariaAvatar = {
   speak,
+  primeVoice,
   startTalking() { cancelSpeak(); talking = true; },
   stopTalking() { cancelSpeak(); },
   setVoice(on) { voiceOn = !!on; if (!on) { try { window.speechSynthesis.cancel(); } catch {} } },
   get voiceOn() { return voiceOn; },
+  get ttsSupported() { return !!(window.speechSynthesis && window.SpeechSynthesisUtterance); },
 };
