@@ -39,6 +39,8 @@ let history = []; // {role, content}
 let liveMode = false;   // hands-free continuous voice conversation
 let processing = false; // a turn (send -> reply -> speak) is in progress
 let currentController = null; // lets "stop" abort an in-flight request
+let speakGuardUntil = 0;      // ignore stray "stop" during thinking + first moment of speech
+let turnCooldownUntil = 0;    // ignore her echo tail right after she finishes
 
 // ------------------------------------------------------------------ safe store
 // Some browsers throw a SecurityError when touching localStorage on a file://
@@ -351,12 +353,14 @@ async function sendText(text) {
   addMessage("user", img ? t + "  📷" : t);
   input.value = "";
   processing = true;
+  speakGuardUntil = Date.now() + 1200; // no "stop" during think + first moment of speech
   try {
     await askOpenRouter(t, img); // resolves after Aria finishes speaking
   } finally {
     processing = false;
-    // hands-free: once she's done replying, listen again for the next turn
-    if (liveMode) setTimeout(() => { if (liveMode && !listening && !processing) startListening(); }, 450);
+    turnCooldownUntil = Date.now() + 800; // ignore her echo tail before next turn
+    // hands-free: once she's done replying, keep listening for the next turn
+    if (liveMode) setTimeout(() => { if (liveMode && !listening && !processing) startListening(); }, 300);
   }
 }
 composer.addEventListener("submit", (e) => {
@@ -392,10 +396,11 @@ function startListening() {
   try { recog.start(); } catch {}
 }
 
-// spoken commands
-const STOP_RE = /\b(stop|wait|hold on|enough|shut up|cancel|pause|quiet)\b/i;
-const EXIT_RE = /\b(exit|good ?bye|bye|end call|hang ?up|quit|stop conversation)\b/i;
-function isShort(t) { return t.trim().split(/\s+/).length <= 3; }
+// spoken commands — matched EXACTLY (whole phrase), so Aria's own sentences
+// echoing into the mic can't accidentally trigger them.
+const STOP_WORDS = new Set(["stop", "stop it", "wait", "hold on", "enough", "cancel", "pause", "quiet"]);
+const EXIT_WORDS = new Set(["exit", "bye", "goodbye", "good bye", "end call", "hang up", "hangup", "quit", "stop conversation"]);
+function normalizeCmd(t) { return t.toLowerCase().replace(/[^a-z\s]/g, "").trim().replace(/\s+/g, " "); }
 
 function interruptSpeech() {
   try { currentController && currentController.abort(); } catch {}
@@ -412,26 +417,29 @@ if (SR) {
 
   recog.onresult = (e) => {
     const last = e.results[e.results.length - 1];
-    const txt = ((last && last[0] && last[0].transcript) || "").trim();
-    if (!txt) return;
+    const raw = ((last && last[0] && last[0].transcript) || "").trim();
+    if (!raw) return;
+    const cmd = normalizeCmd(raw);
 
     if (liveMode) {
-      // "exit"/"bye" ends the live call at any time
-      if (EXIT_RE.test(txt) && isShort(txt) && (last.isFinal || processing)) { stopLive(); return; }
-      // while Aria is replying/speaking: only listen for a "stop" barge-in, ignore the rest (echo)
+      // say exactly "exit"/"bye" to end the call anytime
+      if (EXIT_WORDS.has(cmd) && (last.isFinal || processing)) { stopLive(); return; }
+      // while Aria is replying/speaking: only an exact "stop" barges in; ignore the rest (echo)
       if (processing) {
-        if (STOP_RE.test(txt) && isShort(txt)) interruptSpeech();
+        if (STOP_WORDS.has(cmd) && Date.now() > speakGuardUntil) interruptSpeech();
         return;
       }
+      // ignore the echo tail of her voice for a moment after she finishes
+      if (Date.now() < turnCooldownUntil) return;
       // normal turn
-      input.value = txt;
-      if (last.isFinal) { input.value = ""; sendText(txt); }
+      input.value = raw;
+      if (last.isFinal) { input.value = ""; sendText(raw); }
       return;
     }
 
     // push-to-talk (single utterance)
-    input.value = txt;
-    if (last.isFinal) { stopListening(); sendText(txt); }
+    input.value = raw;
+    if (last.isFinal) { stopListening(); sendText(raw); }
   };
   recog.onerror = (e) => {
     stopListening();

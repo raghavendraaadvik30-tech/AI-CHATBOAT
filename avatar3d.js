@@ -295,10 +295,11 @@ function speak(text) {
   const ss = window.speechSynthesis;
 
   return new Promise((resolve) => {
-    let done = false;
+    let done = false, started = false, startFb = null;
     const finish = () => {
       if (done) return; done = true;
       pendingFinish = null;
+      if (startFb) { clearTimeout(startFb); startFb = null; }
       stopSpeechSync(); stopKeepAlive();
       if (speakTimeout) { clearTimeout(speakTimeout); speakTimeout = null; }
       talking = false; currentViseme = null;
@@ -306,28 +307,33 @@ function speak(text) {
     };
     pendingFinish = finish;
 
+    // Start the lip clock at the ACTUAL audio onset so lips match from word one.
+    const begin = () => {
+      if (started) return; started = true;
+      if (startFb) { clearTimeout(startFb); startFb = null; }
+      startSpeechSync(seq, dur);
+    };
+
     const canSpeak = voiceOn && ss && window.SpeechSynthesisUtterance;
-    // drive the mouth immediately so lips move even if audio lags/fails
-    talking = true;
-    startSpeechSync(seq, dur);
+    talking = true; // mouth gain ramps; it stays near-closed until begin()
 
     if (canSpeak) {
       const u = new SpeechSynthesisUtterance(cleanForSpeech(text) || " ");
       const v = pickVoice(); if (v) u.voice = v;
       u.rate = 1.0; u.pitch = voicePitchFor(v); u.volume = 1.0;
-      u.onstart = () => { talking = true; if (!speechActive) startSpeechSync(seq, dur); };
+      u.onstart = () => { talking = true; begin(); };
       u.onboundary = (e) => { if (typeof e.charIndex === "number") onBoundary(e.charIndex); };
       u.onend = finish;
       u.onerror = finish;
       try {
-        ss.resume();              // clear any paused state
+        ss.resume();
         ss.speak(u);
-        // Chrome goes silent on long utterances (~15s) — nudge it awake.
         keepAlive = setInterval(() => { try { ss.pause(); ss.resume(); } catch {} }, 9000);
-      } catch { /* mouth still animates via scheduler */ }
-      // safety net if onend/onerror never fire (known Chrome quirk)
+      } catch { begin(); }
+      startFb = setTimeout(begin, 400); // if onstart is late/missing, move lips anyway
       speakTimeout = setTimeout(finish, dur + 8000);
     } else {
+      begin();
       speakTimeout = setTimeout(finish, dur);
     }
   });
@@ -449,13 +455,13 @@ function animate() {
     setT("browInnerUp", 0.05 + 0.03 * Math.sin(t * 0.7));
 
     // attentive listening pose — engaged, brows up, looking at you
-    if (listening) {
+    if (listening && !talking) {
       setT("browOuterUp_L", 0.18); setT("browOuterUp_R", 0.18); setT("browInnerUp", 0.2);
       setT("eyeWide_L", 0.12); setT("eyeWide_R", 0.12);
       setT("mouthSmile_L", 0.12); setT("mouthSmile_R", 0.12);
     }
     // thinking — a touch of concentration
-    if (thinking) { setT("browInnerUp", 0.22); setT("browDown_L", 0.1); setT("browDown_R", 0.1); }
+    if (thinking && !talking) { setT("browInnerUp", 0.22); setT("browDown_L", 0.1); setT("browDown_R", 0.1); }
 
     // spontaneous warm micro-smile now and then
     nextSmile -= dt;
@@ -545,7 +551,7 @@ function animate() {
     const idleX = 0.028 * Math.sin(t * 0.63 + 1) + 0.012 * Math.sin(t * 0.23);
     faceRoot.rotation.y = baseRot.y + idleY + px * 0.22;
     faceRoot.rotation.x = baseRot.x + idleX + py * 0.13 + nod * 0.03 * Math.sin(t * 6.5);
-    const tiltZ = (listening ? 0.09 : 0) + (thinking ? 0.06 : 0);
+    const tiltZ = (listening && !talking ? 0.09 : 0) + (thinking && !talking ? 0.06 : 0);
     faceRoot.rotation.z = baseRot.z + 0.014 * Math.sin(t * 0.4) - px * 0.03 + tiltZ;
     faceRoot.position.y = basePos.y + 0.004 * Math.sin(t * 1.1); // breathing
   }
