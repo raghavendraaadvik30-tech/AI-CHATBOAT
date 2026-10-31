@@ -535,7 +535,7 @@ async function requestImageDirect(prompt, engine, aspectRatio, generation) {
   const form = new FormData();
   form.append("prompt", prompt);
   form.append("aspect_ratio", aspectRatio);
-  form.append("output_format", "webp");
+  form.append("output_format", "png");
 
   try {
     const response = await fetch(`https://api.stability.ai/v2beta/stable-image/generate/${engine}`, {
@@ -571,7 +571,10 @@ function decodeGeneratedImage(image, generation) {
     const decodeTimeout = setTimeout(() => reject(new Error("Generated image could not be decoded in time.")), 12_000);
     const abort = () => reject(new DOMException("Cancelled", "AbortError"));
     generation.controller.signal.addEventListener("abort", abort, { once: true });
-    image.decode().then(resolve, reject).finally(() => {
+    image.decode().then(() => {
+      if (image.naturalWidth > 0 && image.naturalHeight > 0) resolve();
+      else reject(new Error("Generated image has no visible dimensions."));
+    }, reject).finally(() => {
       clearTimeout(decodeTimeout);
       generation.controller.signal.removeEventListener("abort", abort);
     });
@@ -628,7 +631,8 @@ async function generateImage(prompt, displayedRequest = prompt) {
     generation.objectUrl = url;
     const image = document.createElement("img");
     image.src = url;
-    image.alt = text;
+    image.alt = "Generated image";
+    image.decoding = "async";
     await decodeGeneratedImage(image, generation);
     assertGenerationActive(generation);
 
@@ -639,12 +643,20 @@ async function generateImage(prompt, displayedRequest = prompt) {
     generation.ui.card.classList.add("ready");
     generation.ui.actions.replaceChildren();
 
+    const open = document.createElement("a");
+    open.className = "image-card-button";
+    open.href = url;
+    open.target = "_blank";
+    open.rel = "noopener";
+    open.textContent = "Open full size";
+
+    const extension = blob.type === "image/jpeg" ? "jpg" : blob.type === "image/webp" ? "webp" : "png";
     const download = document.createElement("a");
     download.className = "image-card-button primary";
     download.href = url;
-    download.download = `aria-${Date.now()}.webp`;
+    download.download = `aria-${Date.now()}.${extension}`;
     download.textContent = "Download";
-    generation.ui.actions.appendChild(download);
+    generation.ui.actions.append(open, download);
   } catch (error) {
     if (!generation.terminal) {
       generation.terminal = true;
@@ -676,17 +688,19 @@ function extractImagePrompt(value) {
   if (!text) return null;
 
   const imageWord = "(?:images?|pictures?|photos?|artworks?|illustrations?|imeges?|imags?)";
+  const createVerb = "(?:create|generate|geneate|genrate|generat|make|draw|design)";
   const slash = text.match(/^\/(?:image|img|ಚಿತ್ರ)\s+(.+)$/iu);
   if (slash) return slash[1].trim();
 
   // Questions about an existing image/camera frame must stay in vision chat.
-  if (/^(?:what|who|where|why|how|describe|identify|recognize|recognise|count|tell\s+me\s+(?:about|what))\b/iu.test(text)) {
+  if (/^(?:what|who|where|why|how|describe|identify|recognize|recognise|count|tell\s+me\s+(?:about|what))\b/iu.test(text)
+      || new RegExp(`^${imageWord}\\s+(?:is|are|was|were|will|wont|won't|not|does|doesn't)\\b`, "iu").test(text)) {
     return null;
   }
 
   const englishPatterns = [
-    new RegExp(`^(?:please\\s+)?(?:can\\s+you\\s+|could\\s+you\\s+|would\\s+you\\s+)?(?:create|generate|make|draw|design)\\s+(?:me\\s+)?(?:an?\\s+)?${imageWord}\\s*(?:of|showing|for)?\\s+(.+)$`, "iu"),
-    new RegExp(`^(?:please\\s+)?(?:create|generate|make|draw|design)\\s+(.+?)\\s+${imageWord}\\s*(?:please|plz)?[.!]*$`, "iu"),
+    new RegExp(`^(?:please\\s+)?(?:can\\s+you\\s+|could\\s+you\\s+|would\\s+you\\s+)?${createVerb}\\s+(?:me\\s+)?(?:an?\\s+)?${imageWord}\\s*(?:of|showing|for)?\\s+(.+)$`, "iu"),
+    new RegExp(`^(?:please\\s+)?${createVerb}\\s+(.+?)\\s+${imageWord}\\s*(?:please|plz)?[.!]*$`, "iu"),
     new RegExp(`^(?:please\\s+)?show\\s+me\\s+(?:an?\\s+)?${imageWord}\\s+(?:of|showing)\\s+(.+)$`, "iu"),
     new RegExp(`^(?:i\\s+want|give\\s+me)\\s+(?:an?\\s+)?${imageWord}\\s+(?:of|showing)\\s+(.+)$`, "iu"),
     new RegExp(`^(?:an?\\s+)?${imageWord}\\s+(?:of|showing)\\s+(.+?)(?:\\s+(?:please|plz))?[.!]*$`, "iu"),
@@ -694,6 +708,13 @@ function extractImagePrompt(value) {
   for (const pattern of englishPatterns) {
     const match = text.match(pattern);
     if (match?.[1]?.trim()) return match[1].replace(/\s+(?:please|plz)[.!]*$/iu, "").trim();
+  }
+
+  // Prefix shorthand: "image any", "image lion", "photo Bengaluru".
+  const prefixShort = text.match(new RegExp(`^${imageWord}\\s+(.+?)(?:\\s+(?:please|plz))?[.!]*$`, "iu"));
+  if (prefixShort?.[1]?.trim()) {
+    const prompt = prefixShort[1].trim();
+    return /^(?:please|plz)[.!]*$/iu.test(prompt) ? "" : prompt;
   }
 
   // Short subject-first requests: "tiger images", "Bengaluru photo plz".

@@ -35,7 +35,7 @@ moves her **jaw and mouth** while she answers, powered by the
   configurable aspect ratios. The Node server proxy avoids browser CORS and
   keeps the key server-side. Every request has a deadline, live elapsed time,
   immediate cancellation (including decode), response-size checks, and a
-  downloadable WebP result.
+  downloadable PNG result.
 - **Vision (camera)** — tap 📷 to share your webcam. A live preview appears over
   the avatar. Each turn can include two chronological frames, allowing Aria to
   inspect static details (fingers, shirt colour, objects) and simple visible

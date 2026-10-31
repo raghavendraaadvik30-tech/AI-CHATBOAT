@@ -377,7 +377,7 @@ body[data-phase="speaking"] .voice-wave span:nth-child(5) { animation-delay: -.1
   animation: spin .8s linear infinite;
 }
 .image-card-caption { margin: 0; padding: 13px 16px 8px; color: var(--text); font-size: 14px; line-height: 1.45; }
-.image-card-actions { display: flex; justify-content: flex-end; padding: 8px 12px 13px; }
+.image-card-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; padding: 8px 12px 13px; }
 .image-card-button {
   border: 1px solid var(--panel-brd);
   border-radius: 9px;

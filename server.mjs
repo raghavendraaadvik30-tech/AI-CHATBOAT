@@ -107,7 +107,7 @@ async function handleImage(req, res) {
     const form = new FormData();
     form.append("prompt", prompt);
     form.append("aspect_ratio", aspectRatio);
-    form.append("output_format", "webp");
+    form.append("output_format", "png");
 
     const upstream = await fetch(`https://api.stability.ai/v2beta/stable-image/generate/${engine}`, {
       method: "POST",
