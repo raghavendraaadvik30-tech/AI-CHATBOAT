@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Aria · AI Avatar Chat</title>
-  <link rel="stylesheet" href="style.css?v=15" />
+  <title>Aria · AI Avatar · Code Origin.AI</title>
+  <link rel="stylesheet" href="style.css?v=16" />
 
   <!-- Three.js via import map (jsDelivr: reliable CORS + binary assets) -->
   <script type="importmap">
@@ -50,12 +50,20 @@
       <h1 class="avatar-name">Aria</h1>
       <p class="avatar-tag">your friendly AI companion</p>
       <div class="provider-pill" id="speechProvider"><span></span>Automatic voice</div>
+
+      <div class="brand-credit" role="contentinfo">
+        <span class="brand-logo" aria-hidden="true">CO</span>
+        <span class="brand-text">
+          Developed by <strong>Raghavendra</strong>
+          <span class="brand-company">Code Origin.AI Private Limited</span>
+        </span>
+      </div>
     </section>
 
     <!-- ============ CHAT PANEL ============ -->
     <section class="chat" aria-label="Chat">
       <header class="chat-head">
-        <div class="chat-head-title">Chat with Aria</div>
+        <div class="chat-head-title">Chat with Aria <span class="chat-head-brand">by Code Origin.AI</span></div>
         <div class="chat-head-actions">
           <button id="callBtn" class="icon-btn" title="Start live voice conversation" aria-label="Start live conversation">📞</button>
           <button id="stopBtn" class="icon-btn stop-btn" title="Stop response" aria-label="Stop response" hidden>■</button>
@@ -182,7 +190,7 @@
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
   <!-- 3D avatar engine, followed by app coordinator -->
-  <script type="module" src="avatar3d.js?v=15"></script>
-  <script type="module" src="app.js?v=15"></script>
+  <script type="module" src="avatar3d.js?v=16"></script>
+  <script type="module" src="app.js?v=16"></script>
 </body>
 </html>
