@@ -3,19 +3,17 @@
 //
 // Renders a real human face scan (three.js `facecap.glb`) and drives the
 // full ARKit blendshape set for lifelike behaviour:
-//   • real lip-sync  — words are converted to viseme mouth shapes and
-//     timed to actual speech (Web Speech API), falling back to a
-//     procedural mouth when speech is unavailable
+//   • real lip-sync  — words -> viseme mouth shapes, timed to real speech
 //   • eyebrows       — idle raises + emotion-driven brow shapes
-//   • eyes           — blinking + random saccades (natural "looking around")
-//   • expression     — emotion inferred from the reply (happy / curious /
-//     excited) applied via smiles, squints, cheeks, nose, eye-wide…
-//   • head           — breathing, gentle sway, and nods while speaking
+//   • eyes           — crisp blinking + random saccades (darting gaze)
+//   • expression     — emotion inferred from the reply
+//   • head           — breathing, gentle sway, nods while speaking
+//
+// NOTE: facecap morph names use `_L` / `_R` suffixes (e.g. eyeBlink_L),
+// not camelCase Left/Right. Getting this wrong is why blinks did nothing.
 //
 // Public API (window.ariaAvatar):
-//   speak(text) -> Promise   speak aloud + lip-sync, resolves when done
-//   startTalking() / stopTalking()   procedural mouth (fallback)
-//   setVoice(bool)           enable/disable spoken audio
+//   speak(text) -> Promise | startTalking() | stopTalking() | setVoice(bool)
 // ========================================================================
 
 import * as THREE from "three";
@@ -61,19 +59,15 @@ const clock = new THREE.Clock();
 
 let voiceOn = true;
 try { if (localStorage.getItem("aria.voice") === "off") voiceOn = false; } catch {}
-let talking = false;            // procedural fallback flag
-let currentViseme = null;       // active viseme shape (object: morph -> weight)
-let mouthGain = 0;              // 0..1 fade of the mouth so it opens/closes smoothly
-let emotion = {};               // current expression layer (morph -> weight)
+let talking = false;
+let currentViseme = null;
+let mouthGain = 0;
+let emotion = {};
 let schedTimer = null, speakTimeout = null, cursor = 0;
 
-// gaze (eye saccades)
 let gazeX = 0, gazeY = 0, gazeTX = 0, gazeTY = 0, nextGaze = 1.5;
-// blink
-let nextBlink = 1.5, blinkT = -1;
-// spontaneous brow raise
+let nextBlink = 1.2, blinkT = -1, blink = 0;
 let browT = -1, nextBrow = 3;
-// head nod impulse while speaking
 let nod = 0;
 
 function idx(n) { return n in nameToIndex ? nameToIndex[n] : -1; }
@@ -81,27 +75,25 @@ function setT(n, v) { const i = idx(n); if (i >= 0) targets[i] = Math.max(target
 function setTExact(n, v) { const i = idx(n); if (i >= 0) targets[i] = v; }
 
 // ---------------------------------------------------------------- visemes
-// Each viseme is a set of ARKit mouth-shape weights. Lip-sync steps through
-// these in time with speech. Values tuned to read clearly on the facecap mesh.
+// ARKit mouth shapes (correct facecap names with _L/_R).
 const VISEMES = {
   sil: {},
-  PP: { mouthClose: 0.22, mouthPressLeft: 0.3, mouthPressRight: 0.3 },
-  FF: { mouthRollLower: 0.3, mouthFunnel: 0.12, jawOpen: 0.06, mouthLowerDownLeft: 0.15, mouthLowerDownRight: 0.15 },
+  PP: { mouthClose: 0.22, mouthPress_L: 0.3, mouthPress_R: 0.3 },
+  FF: { mouthRollLower: 0.3, mouthFunnel: 0.12, jawOpen: 0.06, mouthLowerDown_L: 0.15, mouthLowerDown_R: 0.15 },
   TH: { jawOpen: 0.12, tongueOut: 0.25 },
-  DD: { jawOpen: 0.14, mouthStretchLeft: 0.1, mouthStretchRight: 0.1 },
+  DD: { jawOpen: 0.14, mouthStretch_L: 0.1, mouthStretch_R: 0.1 },
   kk: { jawOpen: 0.17 },
   CH: { mouthFunnel: 0.32, mouthPucker: 0.22, jawOpen: 0.1 },
-  SS: { jawOpen: 0.07, mouthStretchLeft: 0.2, mouthStretchRight: 0.2, mouthClose: 0.08 },
-  nn: { jawOpen: 0.1, mouthStretchLeft: 0.08, mouthStretchRight: 0.08 },
+  SS: { jawOpen: 0.07, mouthStretch_L: 0.2, mouthStretch_R: 0.2, mouthClose: 0.08 },
+  nn: { jawOpen: 0.1, mouthStretch_L: 0.08, mouthStretch_R: 0.08 },
   RR: { mouthFunnel: 0.3, mouthPucker: 0.16, jawOpen: 0.12 },
   aa: { jawOpen: 0.52, mouthFunnel: 0.05 },
-  E:  { jawOpen: 0.26, mouthStretchLeft: 0.26, mouthStretchRight: 0.26, mouthSmileLeft: 0.1, mouthSmileRight: 0.1 },
-  I:  { jawOpen: 0.16, mouthSmileLeft: 0.26, mouthSmileRight: 0.26, mouthStretchLeft: 0.2, mouthStretchRight: 0.2 },
+  E:  { jawOpen: 0.26, mouthStretch_L: 0.26, mouthStretch_R: 0.26, mouthSmile_L: 0.1, mouthSmile_R: 0.1 },
+  I:  { jawOpen: 0.16, mouthSmile_L: 0.26, mouthSmile_R: 0.26, mouthStretch_L: 0.2, mouthStretch_R: 0.2 },
   O:  { jawOpen: 0.36, mouthFunnel: 0.42, mouthPucker: 0.2 },
   U:  { jawOpen: 0.2, mouthPucker: 0.5, mouthFunnel: 0.3 },
 };
 
-// map a lowercased character (with lookahead handled in builder) to a viseme
 function charToViseme(c) {
   switch (c) {
     case "a": return "aa";
@@ -118,16 +110,14 @@ function charToViseme(c) {
     case "j": return "CH";
     case "h": return "aa";
     case " ": case "\n": case "\t": return "sil";
-    default: return null; // punctuation / digits -> brief pause
+    default: return null;
   }
 }
 
-// build an ordered viseme sequence with the char index each one starts at
 function buildVisemeSeq(text) {
   const t = text.toLowerCase();
   const seq = [];
   for (let i = 0; i < t.length; i++) {
-    // digraphs
     const two = t.substr(i, 2);
     if (two === "th") { seq.push({ v: "TH", start: i }); i++; continue; }
     if (two === "ch" || two === "sh") { seq.push({ v: "CH", start: i }); i++; continue; }
@@ -141,28 +131,27 @@ function buildVisemeSeq(text) {
 }
 
 function cleanForSpeech(text) {
-  // strip emoji / symbols that TTS reads awkwardly
   return text.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/gu, "").trim();
 }
 function estDuration(text) {
   const words = cleanForSpeech(text).split(/\s+/).filter(Boolean).length;
-  return Math.max(1200, words * 340 + 400); // ms
+  return Math.max(1200, words * 340 + 400);
 }
 
 // -------------------------------------------------------------- expression
 function setEmotionFromText(text) {
-  const q = (text.match(/\?/g) || []).length;
   const ex = (text.match(/!/g) || []).length;
+  const q = (text.match(/\?/g) || []).length;
   const smiley = /(:\)|:D|😊|😄|😀|🙂|😁|❤|😍|🎉|😎)/.test(text);
   if (ex >= 1 || smiley) {
-    emotion = { browOuterUpLeft: 0.3, browOuterUpRight: 0.3, browInnerUp: 0.15,
-      eyeWideLeft: 0.15, eyeWideRight: 0.15, mouthSmileLeft: 0.28, mouthSmileRight: 0.28,
-      cheekSquintLeft: 0.2, cheekSquintRight: 0.2 };
+    emotion = { browOuterUp_L: 0.3, browOuterUp_R: 0.3, browInnerUp: 0.15,
+      eyeWide_L: 0.15, eyeWide_R: 0.15, mouthSmile_L: 0.28, mouthSmile_R: 0.28,
+      cheekSquint_L: 0.2, cheekSquint_R: 0.2 };
   } else if (q >= 1) {
-    emotion = { browInnerUp: 0.35, browOuterUpLeft: 0.22, browOuterUpRight: 0.1,
-      eyeWideLeft: 0.12, eyeWideRight: 0.12, mouthSmileLeft: 0.1, mouthSmileRight: 0.1 };
+    emotion = { browInnerUp: 0.35, browOuterUp_L: 0.22, browOuterUp_R: 0.1,
+      eyeWide_L: 0.12, eyeWide_R: 0.12, mouthSmile_L: 0.1, mouthSmile_R: 0.1 };
   } else {
-    emotion = { mouthSmileLeft: 0.14, mouthSmileRight: 0.14, cheekSquintLeft: 0.08, cheekSquintRight: 0.08 };
+    emotion = { mouthSmile_L: 0.14, mouthSmile_R: 0.14, cheekSquint_L: 0.08, cheekSquint_R: 0.08 };
   }
 }
 
@@ -179,26 +168,18 @@ function startScheduler(seq, dur) {
   }, step);
 }
 function resyncCursor(seq, charIndex) {
-  for (let i = 0; i < seq.length; i++) {
-    if (seq[i].start >= charIndex) { cursor = i; return; }
-  }
+  for (let i = 0; i < seq.length; i++) if (seq[i].start >= charIndex) { cursor = i; return; }
 }
 
 // -------------------------------------------------------------- voices
 let voices = [];
 function refreshVoices() { try { voices = window.speechSynthesis.getVoices() || []; } catch { voices = []; } }
-if (window.speechSynthesis) {
-  refreshVoices();
-  window.speechSynthesis.onvoiceschanged = refreshVoices;
-}
+if (window.speechSynthesis) { refreshVoices(); window.speechSynthesis.onvoiceschanged = refreshVoices; }
 function pickVoice() {
   if (!voices.length) refreshVoices();
   const pref = ["Google UK English Female", "Samantha", "Microsoft Zira", "Microsoft Aria",
     "Microsoft Jenny", "Google US English", "Karen", "Moira", "Tessa", "Victoria"];
-  for (const name of pref) {
-    const v = voices.find((x) => x.name && x.name.includes(name));
-    if (v) return v;
-  }
+  for (const name of pref) { const v = voices.find((x) => x.name && x.name.includes(name)); if (v) return v; }
   return voices.find((v) => /^en/i.test(v.lang) && /female|zira|aria|jenny|samantha/i.test(v.name))
     || voices.find((v) => /^en/i.test(v.lang)) || voices[0] || null;
 }
@@ -216,7 +197,6 @@ function speak(text) {
   const seq = buildVisemeSeq(text);
   setEmotionFromText(text);
   const dur = estDuration(text);
-
   return new Promise((resolve) => {
     let done = false;
     const finish = () => {
@@ -226,7 +206,6 @@ function speak(text) {
       talking = false; currentViseme = null;
       resolve();
     };
-
     const canSpeak = voiceOn && window.speechSynthesis && window.SpeechSynthesisUtterance;
     if (canSpeak) {
       const u = new SpeechSynthesisUtterance(cleanForSpeech(text) || " ");
@@ -234,17 +213,12 @@ function speak(text) {
       u.rate = 1.0; u.pitch = 1.15; u.volume = 1.0;
       u.onstart = () => { talking = true; startScheduler(seq, dur); };
       u.onboundary = (e) => { if (typeof e.charIndex === "number") resyncCursor(seq, e.charIndex); };
-      u.onend = finish;
-      u.onerror = finish;
-      try {
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(u);
-      } catch { talking = true; startScheduler(seq, dur); }
-      // safety net if onend never fires (some browsers)
+      u.onend = finish; u.onerror = finish;
+      try { window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); }
+      catch { talking = true; startScheduler(seq, dur); }
       speakTimeout = setTimeout(finish, dur + 6000);
     } else {
-      talking = true;
-      startScheduler(seq, dur);
+      talking = true; startScheduler(seq, dur);
       speakTimeout = setTimeout(finish, dur);
     }
   });
@@ -256,7 +230,6 @@ function setLoader(msg, spinning = true) {
   loaderText.textContent = msg;
   loaderEl.classList.toggle("error", !spinning);
 }
-
 const ktx2 = new KTX2Loader().setTranscoderPath(BASIS_PATH).detectSupport(renderer);
 
 new GLTFLoader()
@@ -267,7 +240,7 @@ new GLTFLoader()
     (gltf) => {
       faceRoot = gltf.scene.children[0];
       scene.add(faceRoot);
-      head = faceRoot.getObjectByName("mesh_2") || findMorphMesh(faceRoot);
+      head = findMorphMesh(faceRoot) || faceRoot.getObjectByName("mesh_2");
       if (head && head.morphTargetDictionary) {
         influences = head.morphTargetInfluences;
         targets = influences.slice();
@@ -290,7 +263,11 @@ new GLTFLoader()
 
 function findMorphMesh(root) {
   let found = null;
-  root.traverse((o) => { if (!found && o.isMesh && o.morphTargetInfluences) found = o; });
+  root.traverse((o) => {
+    if (o.isMesh && o.morphTargetInfluences && o.morphTargetDictionary) {
+      if (!found || Object.keys(o.morphTargetDictionary).length > Object.keys(found.morphTargetDictionary).length) found = o;
+    }
+  });
   return found;
 }
 function frameFace() {
@@ -319,22 +296,21 @@ resize();
 
 // ---------------------------------------------------------------- animation
 function applyGaze() {
-  // move both eyes together toward (gazeX, gazeY)
-  if (gazeX > 0) { setTExact("eyeLookOutLeft", gazeX * 0.6); setTExact("eyeLookInRight", gazeX * 0.6); }
-  else { setTExact("eyeLookInLeft", -gazeX * 0.6); setTExact("eyeLookOutRight", -gazeX * 0.6); }
-  if (gazeY > 0) { setTExact("eyeLookUpLeft", gazeY * 0.5); setTExact("eyeLookUpRight", gazeY * 0.5); }
-  else { setTExact("eyeLookDownLeft", -gazeY * 0.5); setTExact("eyeLookDownRight", -gazeY * 0.5); }
+  if (gazeX > 0) { setTExact("eyeLookOut_L", gazeX * 0.6); setTExact("eyeLookIn_R", gazeX * 0.6); }
+  else { setTExact("eyeLookIn_L", -gazeX * 0.6); setTExact("eyeLookOut_R", -gazeX * 0.6); }
+  if (gazeY > 0) { setTExact("eyeLookUp_L", gazeY * 0.5); setTExact("eyeLookUp_R", gazeY * 0.5); }
+  else { setTExact("eyeLookDown_L", -gazeY * 0.5); setTExact("eyeLookDown_R", -gazeY * 0.5); }
 }
 
 const MANAGED = [
-  "eyeBlinkLeft", "eyeBlinkRight", "browInnerUp", "browOuterUpLeft", "browOuterUpRight",
-  "browDownLeft", "browDownRight", "mouthSmileLeft", "mouthSmileRight", "mouthFrownLeft",
-  "mouthFrownRight", "jawOpen", "mouthFunnel", "mouthPucker", "mouthClose", "mouthStretchLeft",
-  "mouthStretchRight", "mouthPressLeft", "mouthPressRight", "mouthRollLower", "mouthLowerDownLeft",
-  "mouthLowerDownRight", "tongueOut", "eyeWideLeft", "eyeWideRight", "eyeSquintLeft", "eyeSquintRight",
-  "cheekSquintLeft", "cheekSquintRight", "noseSneerLeft", "noseSneerRight",
-  "eyeLookInLeft", "eyeLookOutLeft", "eyeLookUpLeft", "eyeLookDownLeft",
-  "eyeLookInRight", "eyeLookOutRight", "eyeLookUpRight", "eyeLookDownRight",
+  "eyeBlink_L", "eyeBlink_R", "browInnerUp", "browOuterUp_L", "browOuterUp_R",
+  "browDown_L", "browDown_R", "mouthSmile_L", "mouthSmile_R", "mouthFrown_L", "mouthFrown_R",
+  "jawOpen", "mouthFunnel", "mouthPucker", "mouthClose", "mouthStretch_L", "mouthStretch_R",
+  "mouthPress_L", "mouthPress_R", "mouthRollLower", "mouthLowerDown_L", "mouthLowerDown_R",
+  "tongueOut", "eyeWide_L", "eyeWide_R", "eyeSquint_L", "eyeSquint_R",
+  "cheekSquint_L", "cheekSquint_R", "noseSneer_L", "noseSneer_R",
+  "eyeLookIn_L", "eyeLookOut_L", "eyeLookUp_L", "eyeLookDown_L",
+  "eyeLookIn_R", "eyeLookOut_R", "eyeLookUp_R", "eyeLookDown_R",
 ];
 
 function animate() {
@@ -342,37 +318,35 @@ function animate() {
   const t = clock.elapsedTime;
 
   if (influences) {
-    // zero managed targets, then layer expression/motion on top
     for (const n of MANAGED) setTExact(n, 0);
 
-    // ---- emotion / resting expression ----
+    // emotion / resting expression
     for (const [k, v] of Object.entries(emotion)) setT(k, v);
     setT("browInnerUp", 0.05 + 0.03 * Math.sin(t * 0.7));
 
-    // ---- blinking ----
+    // blink timing
     nextBlink -= dt;
     if (blinkT < 0 && nextBlink <= 0) { blinkT = 0; nextBlink = 2 + Math.random() * 4; }
-    let blink = 0;
+    blink = 0;
     if (blinkT >= 0) {
       blinkT += dt;
-      const dur = 0.16;
+      const dur = 0.18;
       blink = blinkT < dur / 2 ? blinkT / (dur / 2) : 1 - (blinkT - dur / 2) / (dur / 2);
       blink = Math.max(0, Math.min(1, blink));
       if (blinkT >= dur) blinkT = -1;
     }
-    setT("eyeBlinkLeft", blink); setT("eyeBlinkRight", blink);
 
-    // ---- spontaneous brow raise (expressiveness) ----
+    // spontaneous brow raise
     nextBrow -= dt;
     if (browT < 0 && nextBrow <= 0) { browT = 0; nextBrow = 4 + Math.random() * 6; }
     if (browT >= 0) {
       browT += dt; const d = 0.6;
       const b = Math.sin(Math.min(1, browT / d) * Math.PI) * 0.4;
-      setT("browOuterUpLeft", b); setT("browOuterUpRight", b); setT("browInnerUp", b * 0.6);
+      setT("browOuterUp_L", b); setT("browOuterUp_R", b); setT("browInnerUp", b * 0.6);
       if (browT >= d) browT = -1;
     }
 
-    // ---- eye saccades (natural darting gaze) ----
+    // eye saccades
     nextGaze -= dt;
     if (nextGaze <= 0) {
       gazeTX = (Math.random() * 2 - 1) * 0.7;
@@ -383,7 +357,7 @@ function animate() {
     gazeY += (gazeTY - gazeY) * Math.min(1, dt * 10);
     applyGaze();
 
-    // ---- mouth: lip-sync viseme, or procedural fallback ----
+    // mouth: lip-sync viseme, or procedural fallback
     const speaking = talking || currentViseme;
     mouthGain += ((speaking ? 1 : 0) - mouthGain) * Math.min(1, dt * 12);
     if (currentViseme) {
@@ -394,14 +368,19 @@ function animate() {
       setT("mouthFunnel", 0.1 * (0.5 + 0.5 * Math.sin(t * 8)) * mouthGain);
     }
 
-    // ---- smooth every influence toward target ----
-    const k = 1 - Math.pow(0.0001, dt);
+    // smooth most influences toward target (time-constant ~45ms)
+    const k = 1 - Math.exp(-dt / 0.045);
     for (let i = 0; i < influences.length; i++) {
       influences[i] += (targets[i] - influences[i]) * k;
     }
+
+    // crisp blink: write directly so the 0.18s pulse is fully visible
+    const bL = idx("eyeBlink_L"), bR = idx("eyeBlink_R");
+    if (bL >= 0) influences[bL] = blink;
+    if (bR >= 0) influences[bR] = blink;
   }
 
-  // ---- head: breathing, sway, and nods while speaking ----
+  // head: breathing, sway, nods while speaking
   if (faceRoot) {
     const speakingNow = talking || currentViseme;
     nod += ((speakingNow ? 1 : 0) - nod) * Math.min(1, dt * 4);

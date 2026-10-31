@@ -18,6 +18,9 @@ moves her **jaw and mouth** while she answers, powered by the
   and her lips follow the words: text is converted to viseme mouth shapes and
   timed to the actual speech, resyncing on word boundaries. Toggle voice with
   the 🔊 button.
+- **Voice commands** — tap the 🎤 mic button and **talk to Aria**; your speech
+  is transcribed (Web Speech Recognition) and sent automatically. (Supported in
+  Chrome/Edge/Safari; the button hides itself where unsupported.)
 - **Expressive face** — eyebrow raises, eye **saccades** (natural darting
   gaze), blinking, cheek/nose/squint movement, head nods while talking, and an
   **emotion** read from the reply (happy / curious / excited) that shapes the

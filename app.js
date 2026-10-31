@@ -217,14 +217,71 @@ function typeOut(text) {
 }
 
 // ------------------------------------------------------------------ submit
+function sendText(text) {
+  const t = (text || "").trim();
+  if (!t) return;
+  addMessage("user", t);
+  input.value = "";
+  askOpenRouter(t);
+}
 composer.addEventListener("submit", (e) => {
   e.preventDefault();
-  const text = input.value.trim();
-  if (!text) return;
-  addMessage("user", text);
-  input.value = "";
-  askOpenRouter(text);
+  sendText(input.value);
 });
+
+// ------------------------------------------------------------------ voice command (speech-to-text)
+const micBtn = el("micBtn");
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recog = null;
+let listening = false;
+
+function stopListening() {
+  listening = false;
+  micBtn.classList.remove("listening");
+  try { recog && recog.stop(); } catch {}
+}
+
+function startListening() {
+  if (!recog) return;
+  // Don't let Aria's own voice bleed into the mic.
+  try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
+  input.value = "";
+  input.placeholder = "Listening… speak now";
+  listening = true;
+  micBtn.classList.add("listening");
+  try { recog.start(); } catch {}
+}
+
+if (SR) {
+  recog = new SR();
+  recog.lang = "en-US";
+  recog.interimResults = true;
+  recog.continuous = false;
+  recog.maxAlternatives = 1;
+
+  recog.onresult = (e) => {
+    let txt = "";
+    for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
+    input.value = txt;
+    const last = e.results[e.results.length - 1];
+    if (last && last.isFinal) {
+      stopListening();
+      sendText(txt);
+    }
+  };
+  recog.onerror = (e) => {
+    stopListening();
+    if (e && (e.error === "not-allowed" || e.error === "service-not-allowed")) {
+      addMessage("assistant", "I couldn't access your microphone. Please allow mic permission in your browser, then tap 🎤 again.");
+    }
+  };
+  recog.onend = () => { input.placeholder = "Say something to Aria…"; stopListening(); };
+
+  micBtn.addEventListener("click", () => { listening ? stopListening() : startListening(); });
+} else {
+  // No speech recognition support (e.g. Firefox) — hide the mic button.
+  micBtn.style.display = "none";
+}
 
 // ------------------------------------------------------------------ init
 function init() {
