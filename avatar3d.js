@@ -52,14 +52,15 @@ function makeStudioBackdrop() {
   c.width = 32; c.height = 256;
   const ctx = c.getContext("2d");
   const g = ctx.createLinearGradient(0, 0, 0, 256);
-  g.addColorStop(0, "#2a2064");
-  g.addColorStop(0.5, "#17123c");
-  g.addColorStop(1, "#0c0a1e");
+  g.addColorStop(0, "#3a2c6b");
+  g.addColorStop(0.5, "#1b1640");
+  g.addColorStop(1, "#0d0a20");
   ctx.fillStyle = g; ctx.fillRect(0, 0, 32, 256);
-  // soft warm glow near the top-center, like a studio light spill
-  const r = ctx.createRadialGradient(16, 70, 0, 16, 70, 150);
-  r.addColorStop(0, "rgba(150,120,220,0.35)");
-  r.addColorStop(1, "rgba(150,120,220,0)");
+  // warm studio light spill near the top-centre for lifelike skin tones
+  const r = ctx.createRadialGradient(16, 64, 0, 16, 64, 160);
+  r.addColorStop(0, "rgba(255,196,150,0.33)");
+  r.addColorStop(0.5, "rgba(170,130,225,0.22)");
+  r.addColorStop(1, "rgba(170,130,225,0)");
   ctx.fillStyle = r; ctx.fillRect(0, 0, 32, 256);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -70,8 +71,10 @@ const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
 
 // studio 3-point rig for flattering, realistic skin
-const keyLight = new THREE.DirectionalLight(0xfff0e0, 2.3);
+const keyLight = new THREE.DirectionalLight(0xffe9d2, 2.5);
 keyLight.position.set(1.6, 1.9, 2.4); scene.add(keyLight);
+const warmFront = new THREE.PointLight(0xffd9b3, 0.5, 8);
+warmFront.position.set(0, 0.2, 2.6); scene.add(warmFront);
 const fillLight = new THREE.DirectionalLight(0xbcd3ff, 0.75);
 fillLight.position.set(-2.2, 0.4, 1.6); scene.add(fillLight);
 const rimLight = new THREE.DirectionalLight(0xeaf1ff, 1.9);
@@ -237,20 +240,51 @@ function estDuration(text) {
 }
 
 // -------------------------------------------------------------- expression
+// Infer a human emotion from the reply and shape the whole face accordingly.
+// Only ARKit morphs present in MANAGED are used, so they reset cleanly each
+// frame. Small left/right asymmetry keeps expressions from looking mechanical.
 function setEmotionFromText(text) {
   emotionTarget = 1;
+  const t = text.toLowerCase();
   const ex = (text.match(/!/g) || []).length;
   const q = (text.match(/\?/g) || []).length;
-  const smiley = /(:\)|:D|😊|😄|😀|🙂|😁|❤|😍|🎉|😎)/.test(text);
-  if (ex >= 1 || smiley) {
-    emotion = { browOuterUp_L: 0.3, browOuterUp_R: 0.3, browInnerUp: 0.15,
-      eyeWide_L: 0.15, eyeWide_R: 0.15, mouthSmile_L: 0.28, mouthSmile_R: 0.28,
-      cheekSquint_L: 0.2, cheekSquint_R: 0.2 };
+
+  const affection = /(❤|😍|🥰|😘|love you|miss you|so sweet|dear friend|proud of you|care about you)/i.test(text);
+  const joy = /(😊|😄|😀|🙂|😁|🥳|🎉|😎|haha|hehe|yay|great|awesome|wonderful|happy|glad|delighted|congratulations|congrats|excellent|amazing|fantastic|ಸಂತೋಷ|खुशी|மகிழ்ச்சி)/i.test(text);
+  const surprise = /(😮|😲|😳|wow|whoa|oh my|no way|incredible|unbelievable|can'?t believe|really\?!?|surprising|ಆಶ್ಚರ್ಯ)/i.test(text);
+  const sad = /(😢|😔|😞|🙁|i'?m sorry|unfortunately|sadly|apolog|regret|i can'?t|i cannot|not able to|that'?s sad|ಕ್ಷಮಿಸಿ|दुख)/i.test(text);
+  const concern = /(please be careful|be careful|warning|caution|worried|concerned|that'?s a problem|there'?s an issue|an error|careful)/i.test(text);
+  const playful = /(😉|😜|😏|😹|just kidding|kidding|teasing|hehe|wink)/i.test(text);
+
+  const aL = 0.88 + Math.random() * 0.24;
+  const aR = 0.88 + Math.random() * 0.24;
+
+  if (affection) {
+    emotion = { mouthSmile_L: 0.3 * aL, mouthSmile_R: 0.3 * aR, cheekSquint_L: 0.32, cheekSquint_R: 0.32,
+      eyeSquint_L: 0.2, eyeSquint_R: 0.2, browInnerUp: 0.14 };
+  } else if (surprise) {
+    emotion = { eyeWide_L: 0.42, eyeWide_R: 0.42, browInnerUp: 0.3, browOuterUp_L: 0.45 * aL, browOuterUp_R: 0.45 * aR,
+      jawOpen: 0.14, mouthSmile_L: 0.12, mouthSmile_R: 0.12 };
+  } else if (joy || ex >= 2) {
+    emotion = { mouthSmile_L: 0.44 * aL, mouthSmile_R: 0.44 * aR, cheekSquint_L: 0.32, cheekSquint_R: 0.32,
+      eyeSquint_L: 0.16, eyeSquint_R: 0.16, browOuterUp_L: 0.22, browOuterUp_R: 0.22 };
+  } else if (sad) {
+    emotion = { browInnerUp: 0.42, mouthFrown_L: 0.2 * aL, mouthFrown_R: 0.2 * aR,
+      eyeSquint_L: 0.12, eyeSquint_R: 0.12, mouthPress_L: 0.12, mouthPress_R: 0.12 };
+  } else if (concern) {
+    emotion = { browInnerUp: 0.32, browDown_L: 0.16, browDown_R: 0.16,
+      mouthPress_L: 0.16, mouthPress_R: 0.16, eyeWide_L: 0.08, eyeWide_R: 0.08 };
+  } else if (playful) {
+    emotion = { mouthSmile_L: 0.4 * aL, mouthSmile_R: 0.18 * aR, browOuterUp_L: 0.32,
+      cheekSquint_L: 0.26, eyeSquint_L: 0.14 }; // asymmetric smirk
   } else if (q >= 1) {
-    emotion = { browInnerUp: 0.35, browOuterUp_L: 0.22, browOuterUp_R: 0.1,
-      eyeWide_L: 0.12, eyeWide_R: 0.12, mouthSmile_L: 0.1, mouthSmile_R: 0.1 };
+    emotion = { browInnerUp: 0.32, browOuterUp_L: 0.22 * aL, browOuterUp_R: 0.1 * aR,
+      eyeWide_L: 0.1, eyeWide_R: 0.1, mouthSmile_L: 0.12, mouthSmile_R: 0.12 };
+  } else if (ex >= 1) {
+    emotion = { browOuterUp_L: 0.26, browOuterUp_R: 0.26, eyeWide_L: 0.14, eyeWide_R: 0.14,
+      mouthSmile_L: 0.28 * aL, mouthSmile_R: 0.28 * aR, cheekSquint_L: 0.18, cheekSquint_R: 0.18 };
   } else {
-    emotion = { mouthSmile_L: 0.14, mouthSmile_R: 0.14, cheekSquint_L: 0.08, cheekSquint_R: 0.08 };
+    emotion = { mouthSmile_L: 0.15 * aL, mouthSmile_R: 0.15 * aR, cheekSquint_L: 0.08, cheekSquint_R: 0.08 };
   }
 }
 

@@ -40,11 +40,13 @@ moves her **jaw and mouth** while she answers, powered by the
   the avatar. Each turn can include two chronological frames, allowing Aria to
   inspect static details (fingers, shirt colour, objects) and simple visible
   gestures. Requires a vision-capable model.
-- **Expressive face** — staged asymmetric blinks, occasional double blinks,
-  gaze-linked blinking, eyes that lead slower head turns, smooth expression
-  attack/release, cheek/nose/squint movement, and non-rhythmic phrase gestures.
-  The included asset is a head-only ARKit rig; anatomically correct arm, hand,
-  shoulder, and full-body gestures require a different licensed model.
+- **Emotional face** — the reply's meaning drives real expressions: joy,
+  warmth/affection, surprise, sadness/empathy, concern, and playful smirks,
+  each with natural left/right asymmetry, smooth attack/release, staged
+  asymmetric blinks, gaze-linked blinking, and eyes that lead slower head
+  turns. Lightweight WebGL, so it runs without a dedicated GPU. The asset is a
+  head-only ARKit rig; true photoreal video or full-body gestures would require
+  a cloud talking-head service or a different licensed model.
 - **Glassmorphism chat UI** — animated message bubbles, bouncing typing
   indicator, live status pill (Online / Thinking / Speaking).
 - **OpenRouter integration** — bring your own key and model.
