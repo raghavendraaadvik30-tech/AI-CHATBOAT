@@ -21,6 +21,10 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { KTX2Loader } from "three/addons/loaders/KTX2Loader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 
 const BASIS_PATH = "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/basis/";
 const MODEL_URL = "https://cdn.jsdelivr.net/gh/mrdoob/three.js@r160/examples/models/gltf/facecap.glb";
@@ -38,8 +42,29 @@ renderer.toneMappingExposure = 1.05;
 container.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
+scene.background = makeStudioBackdrop(); // opaque gradient -> cohesive + lets bloom work
+
 const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 50);
 camera.position.set(0, 0.06, 2.4);
+
+function makeStudioBackdrop() {
+  const c = document.createElement("canvas");
+  c.width = 32; c.height = 256;
+  const ctx = c.getContext("2d");
+  const g = ctx.createLinearGradient(0, 0, 0, 256);
+  g.addColorStop(0, "#2a2064");
+  g.addColorStop(0.5, "#17123c");
+  g.addColorStop(1, "#0c0a1e");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 32, 256);
+  // soft warm glow near the top-center, like a studio light spill
+  const r = ctx.createRadialGradient(16, 70, 0, 16, 70, 150);
+  r.addColorStop(0, "rgba(150,120,220,0.35)");
+  r.addColorStop(1, "rgba(150,120,220,0)");
+  ctx.fillStyle = r; ctx.fillRect(0, 0, 32, 256);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
 
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
@@ -53,6 +78,13 @@ const rimLight = new THREE.DirectionalLight(0xeaf1ff, 1.9);
 rimLight.position.set(-1.3, 1.7, -2.3); scene.add(rimLight);
 const topLight = new THREE.DirectionalLight(0xffffff, 0.5);
 topLight.position.set(0, 3, 0.5); scene.add(topLight);
+
+// cinematic post-processing: subtle bloom for realistic catchlights + rim glow
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.22, 0.5, 0.82);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
 
 // ---------------------------------------------------------------- state
 let head = null, influences = null, targets = null;
@@ -349,6 +381,7 @@ function frameFace() {
 function resize() {
   const w = container.clientWidth || 1, h = container.clientHeight || 1;
   renderer.setSize(w, h, false);
+  composer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
@@ -468,7 +501,7 @@ function animate() {
     camera.lookAt(lookAt);
   }
 
-  renderer.render(scene, camera);
+  composer.render();
 }
 renderer.setAnimationLoop(animate);
 

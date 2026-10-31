@@ -82,11 +82,14 @@ html, body {
 .avatar-canvas {
   position: relative;
   width: 100%;
-  max-width: 460px;
-  height: 460px;
+  max-width: 440px;
+  height: 480px;
   display: grid;
   place-items: center;
-  filter: drop-shadow(0 30px 60px rgba(0,0,0,0.5));
+  border-radius: 26px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.12);
+  box-shadow: 0 30px 70px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(255,255,255,0.05);
 }
 /* soft studio backdrop disc behind the head */
 .avatar-canvas::before {
@@ -106,8 +109,8 @@ html, body {
   inset: 0;
   z-index: 2;
   pointer-events: none;
-  border-radius: 24px;
-  background: radial-gradient(circle at 50% 42%, transparent 52%, rgba(10,8,25,0.5) 100%);
+  border-radius: 26px;
+  background: radial-gradient(circle at 50% 42%, transparent 55%, rgba(8,6,20,0.55) 100%);
 }
 .avatar-canvas canvas {
   position: relative;
