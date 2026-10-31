@@ -44,10 +44,15 @@ camera.position.set(0, 0.06, 2.4);
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
 
-const key = new THREE.DirectionalLight(0xffffff, 1.6);
-key.position.set(1.2, 1.5, 2.5); scene.add(key);
-const rim = new THREE.DirectionalLight(0x9bc4ff, 0.8);
-rim.position.set(-2, 1, -1.5); scene.add(rim);
+// studio 3-point rig for flattering, realistic skin
+const keyLight = new THREE.DirectionalLight(0xfff0e0, 2.3);
+keyLight.position.set(1.6, 1.9, 2.4); scene.add(keyLight);
+const fillLight = new THREE.DirectionalLight(0xbcd3ff, 0.75);
+fillLight.position.set(-2.2, 0.4, 1.6); scene.add(fillLight);
+const rimLight = new THREE.DirectionalLight(0xeaf1ff, 1.9);
+rimLight.position.set(-1.3, 1.7, -2.3); scene.add(rimLight);
+const topLight = new THREE.DirectionalLight(0xffffff, 0.5);
+topLight.position.set(0, 3, 0.5); scene.add(topLight);
 
 // ---------------------------------------------------------------- state
 let head = null, influences = null, targets = null;
@@ -67,9 +72,19 @@ let schedTimer = null, speakTimeout = null, cursor = 0;
 let primed = false, keepAlive = null;
 
 let gazeX = 0, gazeY = 0, gazeTX = 0, gazeTY = 0, nextGaze = 1.5;
+let sacX = 0, sacY = 0;
 let nextBlink = 1.2, blinkT = -1, blink = 0;
 let browT = -1, nextBrow = 3;
 let nod = 0;
+
+// pointer tracking — she looks toward your cursor (big "alive" boost)
+let px = 0, py = 0, tpx = 0, tpy = 0;
+window.addEventListener("pointermove", (e) => {
+  tpx = (e.clientX / window.innerWidth) * 2 - 1;
+  tpy = (e.clientY / window.innerHeight) * 2 - 1;
+});
+const camBase = new THREE.Vector3();
+const lookAt = new THREE.Vector3();
 
 function idx(n) { return n in nameToIndex ? nameToIndex[n] : -1; }
 function setT(n, v) { const i = idx(n); if (i >= 0) targets[i] = Math.max(targets[i], v); }
@@ -315,6 +330,19 @@ function frameFace() {
   dist *= 1.45;
   camera.position.set(center.x, center.y + size.y * 0.04, center.z + dist);
   camera.lookAt(center.x, center.y, center.z);
+  camBase.copy(camera.position);
+  lookAt.set(center.x, center.y, center.z);
+
+  // give the skin a touch more life from the environment
+  faceRoot.traverse((o) => {
+    if (o.isMesh && o.material) {
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) {
+        if ("envMapIntensity" in m) m.envMapIntensity = 1.15;
+        m.needsUpdate = true;
+      }
+    }
+  });
 }
 
 // ---------------------------------------------------------------- resize
@@ -380,13 +408,15 @@ function animate() {
       if (browT >= d) browT = -1;
     }
 
-    // eye saccades
+    // gaze: track the pointer, plus small saccade jitter for life
     nextGaze -= dt;
     if (nextGaze <= 0) {
-      gazeTX = (Math.random() * 2 - 1) * 0.7;
-      gazeTY = (Math.random() * 2 - 1) * 0.5;
-      nextGaze = 0.8 + Math.random() * 2.5;
+      sacX = (Math.random() * 2 - 1) * 0.22;
+      sacY = (Math.random() * 2 - 1) * 0.16;
+      nextGaze = 0.7 + Math.random() * 2.2;
     }
+    gazeTX = Math.max(-1, Math.min(1, px * 0.7 + sacX));
+    gazeTY = Math.max(-1, Math.min(1, py * 0.5 + sacY));
     gazeX += (gazeTX - gazeX) * Math.min(1, dt * 10);
     gazeY += (gazeTY - gazeY) * Math.min(1, dt * 10);
     applyGaze();
@@ -414,14 +444,28 @@ function animate() {
     if (bR >= 0) influences[bR] = blink;
   }
 
-  // head: breathing, sway, nods while speaking
+  // smooth pointer
+  px += (tpx - px) * Math.min(1, dt * 3.5);
+  py += (tpy - py) * Math.min(1, dt * 3.5);
+
+  // head: breathing + layered idle sway + turn toward the pointer + nods
   if (faceRoot) {
     const speakingNow = talking || currentViseme;
     nod += ((speakingNow ? 1 : 0) - nod) * Math.min(1, dt * 4);
-    faceRoot.rotation.y = baseRot.y + 0.05 * Math.sin(t * 0.5) + 0.02 * Math.sin(t * 0.17);
-    faceRoot.rotation.x = baseRot.x + 0.03 * Math.sin(t * 0.63 + 1) + nod * 0.03 * Math.sin(t * 6.5);
-    faceRoot.rotation.z = baseRot.z + 0.015 * Math.sin(t * 0.4);
-    faceRoot.position.y = basePos.y + 0.004 * Math.sin(t * 1.1);
+    const idleY = 0.045 * Math.sin(t * 0.5) + 0.02 * Math.sin(t * 0.17 + 1);
+    const idleX = 0.028 * Math.sin(t * 0.63 + 1) + 0.012 * Math.sin(t * 0.23);
+    faceRoot.rotation.y = baseRot.y + idleY + px * 0.22;
+    faceRoot.rotation.x = baseRot.x + idleX + py * 0.13 + nod * 0.03 * Math.sin(t * 6.5);
+    faceRoot.rotation.z = baseRot.z + 0.014 * Math.sin(t * 0.4) - px * 0.03;
+    faceRoot.position.y = basePos.y + 0.004 * Math.sin(t * 1.1); // breathing
+  }
+
+  // subtle camera parallax for depth (only once framed)
+  if (faceRoot) {
+    camera.position.x = camBase.x + px * 0.08;
+    camera.position.y = camBase.y - py * 0.05;
+    camera.position.z = camBase.z;
+    camera.lookAt(lookAt);
   }
 
   renderer.render(scene, camera);
