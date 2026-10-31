@@ -81,11 +81,7 @@ saveBtn.addEventListener("click", () => {
     closeModal();
     setStatus("Online");
     if (!storageWorks) {
-      addMessage(
-        "assistant",
-        "Heads up: your browser is blocking saved settings (this happens when the page is opened as a file://). " +
-        "Your key works for this session, but to make it persist, run the app from a local web server — e.g. `python3 -m http.server` then open http://localhost:8000."
-      );
+      toast("Settings won't persist — your browser is blocking storage (common on file:// pages). Run from a local server to keep them.", "error");
     }
   }, 550);
 });
@@ -118,13 +114,32 @@ function setStatus(text, thinking = false) {
 }
 
 // ------------------------------------------------------------------ messages
+// Chat bubbles are ONLY for real content: what the user sends and what the
+// model actually replies. App notifications use toast() instead, so nothing
+// is ever faked as if Aria said it.
 function addMessage(role, text) {
+  const hint = el("emptyHint");
+  if (hint) hint.remove();
   const div = document.createElement("div");
   div.className = "msg " + (role === "user" ? "me" : "bot");
   div.textContent = text;
   messagesBox.appendChild(div);
   messagesBox.scrollTop = messagesBox.scrollHeight;
   return div;
+}
+
+// transient, dismissable notification (not part of the conversation)
+const toastsBox = el("toasts");
+function toast(msg, type = "info", ms) {
+  if (!toastsBox) return;
+  const d = document.createElement("div");
+  d.className = "toast " + type;
+  d.textContent = msg;
+  toastsBox.appendChild(d);
+  const life = ms || (type === "error" ? 7000 : 3500);
+  const timer = setTimeout(dismiss, life);
+  function dismiss() { clearTimeout(timer); d.classList.add("out"); setTimeout(() => d.remove(), 250); }
+  d.addEventListener("click", dismiss);
 }
 
 function showTyping(on) {
@@ -144,7 +159,7 @@ async function askOpenRouter(userText, imageDataUrl = null) {
   const key = getKey();
   if (!key) {
     openModal();
-    addMessage("assistant", "Please add your OpenRouter API key in settings (⚙) first.");
+    toast("Add your OpenRouter API key in settings first.", "error");
     return;
   }
 
@@ -185,7 +200,7 @@ async function askOpenRouter(userText, imageDataUrl = null) {
     if (!res.ok) {
       const errText = await res.text();
       setStatus("Online");
-      addMessage("assistant", `⚠️ API error (${res.status}): ${errText.slice(0, 300)}`);
+      toast(`API error (${res.status}): ${errText.slice(0, 200)}`, "error", 10000);
       return;
     }
 
@@ -206,7 +221,7 @@ async function askOpenRouter(userText, imageDataUrl = null) {
     showTyping(false);
     stopTalking();
     setStatus("Online");
-    addMessage("assistant", "⚠️ Network error: " + err.message);
+    toast("Network error: " + err.message, "error", 10000);
   }
 }
 
@@ -236,11 +251,14 @@ const camPreview = el("camPreview");
 let camStream = null;
 let cameraOn = false;
 
+let camStarting = false;
 async function startCamera() {
+  if (cameraOn || camStarting) return; // guard against double-clicks
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    addMessage("assistant", "Your browser doesn't support camera access here.");
+    toast("This browser can't access the camera here.", "error");
     return;
   }
+  camStarting = true;
   try {
     camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
     cameraEl.srcObject = camStream;
@@ -249,9 +267,11 @@ async function startCamera() {
     cameraOn = true;
     cameraBtn.classList.add("active");
     cameraBtn.title = "Camera on — click to turn off";
-    addMessage("assistant", "Camera's on — I can see you now! 👀 Show me something and ask what it is, how many fingers, your shirt colour…");
+    toast("Camera on — Aria can see you now.", "info");
   } catch (e) {
-    addMessage("assistant", "I couldn't open the camera. Please allow camera permission in your browser and tap 📷 again.");
+    toast("Couldn't open the camera. Allow camera permission, then tap 📷 again.", "error");
+  } finally {
+    camStarting = false;
   }
 }
 
@@ -339,7 +359,7 @@ if (SR) {
   recog.onerror = (e) => {
     stopListening();
     if (e && (e.error === "not-allowed" || e.error === "service-not-allowed")) {
-      addMessage("assistant", "I couldn't access your microphone. Please allow mic permission in your browser, then tap 🎤 again.");
+      toast("Couldn't access the microphone. Allow mic permission, then tap 🎤 again.", "error");
     }
   };
   recog.onend = () => { input.placeholder = "Say something to Aria…"; stopListening(); };
@@ -357,10 +377,7 @@ if (SR) {
 function init() {
   try { loadSettings(); } catch (e) { /* storage blocked — handled by safe store */ }
   applyVoice(store.get(VOICE_STORE) !== "off"); // default: voice on
-  // greeting
-  addMessage(
-    "assistant",
-    "Hi, I'm Aria! 👋 Tap the ⚙ icon to add your OpenRouter API key, then let's chat."
-  );
+  // No fake greeting — the empty-state hint in #messages guides the user,
+  // and the chat only ever shows real user/model exchanges.
 }
 init();
