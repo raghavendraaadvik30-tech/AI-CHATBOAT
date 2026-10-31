@@ -25,10 +25,13 @@ moves her **jaw and mouth** while she answers, powered by the
   listen → think → speak → acoustic pause → listen. The microphone is closed
   while Aria speaks, which prevents speaker output from feeding back as a new
   question. Use the red ■ control to interrupt a response safely.
-- **Stability AI image generation** — enter a Stability key, type an image
-  prompt, and press the picture button beside 🎤. Choose Stable Image Core or
-  Ultra and a saved aspect ratio. Generated WebP images appear as dedicated
-  cards with cancellation and download controls.
+- **Automatic image requests** — typed or spoken requests such as “generate an
+  image of a tiger”, “show me a picture of Bengaluru”, `/image ...`, or
+  “ಬೆಂಗಳೂರಿನ ಚಿತ್ರವನ್ನು ರಚಿಸಿ” route directly to Stability AI. Questions about
+  camera images continue to use vision chat instead of generating new images.
+- **Stability AI image generation** — enter a Stability key and choose Stable
+  Image Core or Ultra plus an aspect ratio. Generated WebP images appear as
+  dedicated cards with cancellation and download controls.
 - **Vision (camera)** — tap 📷 to share your webcam. A live preview appears over
   the avatar. Each turn can include two chronological frames, allowing Aria to
   inspect static details (fingers, shirt colour, objects) and simple visible
@@ -50,8 +53,9 @@ moves her **jaw and mouth** while she answers, powered by the
 3. Click **⚙ settings** and add the provider keys you use: OpenRouter for
    chat/vision, Google for primary Kannada speech, and Stability AI for image
    generation. Leave speech mode on Automatic.
-4. Tap 📞 for a no-echo conversation, 🎤 for one voice turn, or type an image
-   prompt and press the picture button to generate an image.
+4. Tap 📞 for a no-echo conversation or 🎤 for one voice turn. Ask “generate
+   an image of…” by text or voice to route that request automatically to
+   Stability AI; the picture button remains available as a manual shortcut.
 
 Your keys are stored in the browser's `localStorage`. The OpenRouter key is
 sent only to OpenRouter, the Google key only to Google's native Gemini API,

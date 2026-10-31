@@ -428,10 +428,11 @@ function createImageCard(prompt) {
   return { card, preview, state, actions, cancel };
 }
 
-async function generateImage(prompt) {
+async function generateImage(prompt, displayedRequest = prompt) {
   const text = (prompt || "").trim();
   if (!text) { toast("Enter an image prompt first.", "error"); return; }
   if (!getStabilityKey()) {
+    if (liveMode) stopLive();
     openModal();
     toast("Add your Stability AI API key first.", "error");
     return;
@@ -442,11 +443,12 @@ async function generateImage(prompt) {
   }
 
   stopRecognition(true);
+  setPhase("idle");
   const controller = new AbortController();
   activeImageGeneration = { controller };
   imageBtn.disabled = true;
   imageBtn.classList.add("generating");
-  addMessage("user", `${text}  🎨`);
+  addMessage("user", `${displayedRequest}  🎨`);
   input.value = "";
   const ui = createImageCard(text);
   ui.cancel.addEventListener("click", () => controller.abort(), { once: true });
@@ -515,6 +517,40 @@ window.addEventListener("pagehide", () => {
   generatedImageUrls.forEach((url) => URL.revokeObjectURL(url));
   generatedImageUrls.clear();
 });
+
+// ------------------------------------------------------------------ automatic image-request routing
+function extractImagePrompt(value) {
+  const text = (value || "").trim();
+  if (!text) return null;
+
+  const slash = text.match(/^\/(?:image|img|ಚಿತ್ರ)\s+(.+)$/iu);
+  if (slash) return slash[1].trim();
+
+  const englishPatterns = [
+    /^(?:please\s+)?(?:can\s+you\s+|could\s+you\s+|would\s+you\s+)?(?:create|generate|make|draw|design)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|photo|artwork|illustration)\s*(?:of|showing|for)?\s+(.+)$/iu,
+    /^(?:please\s+)?show\s+me\s+(?:an?\s+)?(?:image|picture|photo|illustration)\s+(?:of|showing)\s+(.+)$/iu,
+    /^(?:i\s+want|give\s+me)\s+(?:an?\s+)?(?:image|picture|photo|illustration)\s+(?:of|showing)\s+(.+)$/iu,
+  ];
+  for (const pattern of englishPatterns) {
+    const match = text.match(pattern);
+    if (match?.[1]?.trim()) return match[1].trim();
+  }
+
+  // Kannada requests commonly put the subject before "ಚಿತ್ರವನ್ನು ರಚಿಸಿ".
+  const hasKannadaImageWord = /(?:ಚಿತ್ರ|ಚಿತ್ರವನ್ನು|ಚಿತ್ರವನ್ನೂ|ಫೋಟೋ|ಛಾಯಾಚಿತ್ರ|ಚಿತ್ರಣ)/u.test(text);
+  const hasKannadaCreateVerb = /(?:ರಚಿಸು|ರಚಿಸಿ|ಸೃಷ್ಟಿಸು|ಸೃಷ್ಟಿಸಿ|ತಯಾರಿಸು|ತಯಾರಿಸಿ|ಮಾಡು|ಮಾಡಿ|ಬರೆಯು|ಬರೆಯಿರಿ)/u.test(text);
+  if (hasKannadaImageWord && hasKannadaCreateVerb) {
+    const cleaned = text
+      .replace(/(?:ದಯವಿಟ್ಟು|ನನಗೆ|ಒಂದು)/gu, " ")
+      .replace(/(?:ಚಿತ್ರವನ್ನು|ಚಿತ್ರವನ್ನೂ|ಛಾಯಾಚಿತ್ರವನ್ನು|ಚಿತ್ರ|ಫೋಟೋ|ಛಾಯಾಚಿತ್ರ|ಚಿತ್ರಣ)/gu, " ")
+      .replace(/(?:ರಚಿಸು|ರಚಿಸಿ|ಸೃಷ್ಟಿಸು|ಸೃಷ್ಟಿಸಿ|ತಯಾರಿಸು|ತಯಾರಿಸಿ|ಮಾಡು|ಮಾಡಿ|ಬರೆಯು|ಬರೆಯಿರಿ)/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return cleaned || null;
+  }
+
+  return null;
+}
 
 // ------------------------------------------------------------------ request/turn coordinator
 function buildVisionMessage(text, frames) {
@@ -707,7 +743,15 @@ function typeOut(text, turn) {
 
 async function runTurn(text) {
   const value = (text || "").trim();
-  if (!value || activeTurn) return;
+  if (!value) return;
+
+  const imagePrompt = extractImagePrompt(value);
+  if (imagePrompt) {
+    await generateImage(imagePrompt, value);
+    return;
+  }
+
+  if (activeTurn) return;
   if (activeImageGeneration) { toast("Wait for image generation to finish.", "error"); return; }
   if (!getKey()) {
     openModal();
@@ -791,7 +835,7 @@ function clearListenTimer() {
 
 function stopRecognition(abort = false) {
   clearListenTimer();
-  input.placeholder = "Say something to Aria…";
+  input.placeholder = "Ask Aria or say “generate an image…”";
   const current = recognition;
   recognition = null;
   recognitionToken++;
@@ -851,7 +895,7 @@ function startListening({ live = false, session = callSession } = {}) {
     }
   };
   rec.onend = () => {
-    input.placeholder = "Say something to Aria…";
+    input.placeholder = "Ask Aria or say “generate an image…”";
     if (recognition === rec) recognition = null;
     micBtn.classList.remove("listening");
     if (live && liveMode && session === callSession && !activeTurn && token === recognitionToken) {

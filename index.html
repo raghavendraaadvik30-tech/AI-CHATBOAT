@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=5" />
+  <link rel="stylesheet" href="style.css?v=6" />
 
   <!-- Three.js via import map (jsDelivr: reliable CORS + binary assets) -->
   <script type="importmap">
@@ -68,7 +68,7 @@
       </header>
 
       <div class="messages" id="messages" aria-live="polite">
-        <div class="empty-hint" id="emptyHint">Add your keys in ⚙, then chat with Aria — type, talk (🎤), show your camera (📷), or generate an image with the picture button.</div>
+        <div class="empty-hint" id="emptyHint">Chat by typing or voice. Say “generate an image of…” to create art automatically, or use 🎤, 📷 and 📞 for live conversation.</div>
       </div>
 
       <div class="typing" id="typing" hidden>
@@ -86,7 +86,7 @@
           id="input"
           class="composer-input"
           type="text"
-          placeholder="Say something to Aria…"
+          placeholder="Ask Aria or say “generate an image…”"
           autocomplete="off"
         />
         <button type="submit" class="send-btn" id="sendBtn" aria-label="Send">
@@ -184,7 +184,7 @@
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
   <!-- 3D avatar engine, followed by app coordinator -->
-  <script type="module" src="avatar3d.js?v=5"></script>
-  <script type="module" src="app.js?v=5"></script>
+  <script type="module" src="avatar3d.js?v=6"></script>
+  <script type="module" src="app.js?v=6"></script>
 </body>
 </html>
