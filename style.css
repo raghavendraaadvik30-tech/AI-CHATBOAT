@@ -399,7 +399,7 @@ html, body {
 .modal h2 { margin: 0 0 18px; font-size: 22px; }
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
 .field span { font-size: 14px; color: var(--muted); }
-.field input, .field textarea {
+.field input, .field textarea, .field select {
   background: rgba(255,255,255,0.05);
   border: 1px solid var(--panel-brd);
   border-radius: 10px;
@@ -410,7 +410,9 @@ html, body {
   outline: none;
   resize: vertical;
 }
-.field input:focus, .field textarea:focus { border-color: var(--accent); }
+.field select { cursor: pointer; }
+.field select option { background: #17133a; color: var(--text); }
+.field input:focus, .field textarea:focus, .field select:focus { border-color: var(--accent); }
 .field small { color: #7d77a8; font-size: 12px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
 .btn-ghost, .btn-primary {

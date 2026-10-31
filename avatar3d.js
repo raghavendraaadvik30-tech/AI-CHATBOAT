@@ -223,16 +223,28 @@ function resyncCursor(seq, charIndex) {
 
 // -------------------------------------------------------------- voices
 let voices = [];
+let preferredVoiceName = null;
+try { preferredVoiceName = localStorage.getItem("aria.voiceName") || null; } catch {}
 function refreshVoices() { try { voices = window.speechSynthesis.getVoices() || []; } catch { voices = []; } }
 if (window.speechSynthesis) { refreshVoices(); window.speechSynthesis.onvoiceschanged = refreshVoices; }
+
+const FEMALE_RE = /female|zira|aria|jenny|samantha|karen|moira|tessa|victoria|susan|fiona|hazel|serena|catherine|amelie/i;
+
 function pickVoice() {
   if (!voices.length) refreshVoices();
-  const pref = ["Google UK English Female", "Samantha", "Microsoft Zira", "Microsoft Aria",
-    "Microsoft Jenny", "Google US English", "Karen", "Moira", "Tessa", "Victoria"];
-  for (const name of pref) { const v = voices.find((x) => x.name && x.name.includes(name)); if (v) return v; }
-  return voices.find((v) => /^en/i.test(v.lang) && /female|zira|aria|jenny|samantha/i.test(v.name))
+  // 1) exact user choice
+  if (preferredVoiceName) {
+    const exact = voices.find((v) => v.name === preferredVoiceName);
+    if (exact) return exact;
+  }
+  // 2) automatic -> prefer a MALE English voice
+  const male = ["Google UK English Male", "Microsoft David", "Microsoft Mark", "Microsoft Guy",
+    "Daniel", "Alex", "Fred", "Rishi", "Aaron", "Arthur", "Oliver", "Thomas"];
+  for (const name of male) { const v = voices.find((x) => x.name && x.name.includes(name)); if (v) return v; }
+  return voices.find((v) => /^en/i.test(v.lang) && /male|david|mark|daniel|alex|fred|guy|oliver|thomas/i.test(v.name) && !FEMALE_RE.test(v.name))
     || voices.find((v) => /^en/i.test(v.lang)) || voices[0] || null;
 }
+function voicePitchFor(v) { return v && FEMALE_RE.test(v.name) ? 1.12 : 0.95; }
 
 // -------------------------------------------------------------- speak
 // Unlock speech during a real user gesture. Browsers (esp. Chrome/Safari)
@@ -288,7 +300,7 @@ function speak(text) {
     if (canSpeak) {
       const u = new SpeechSynthesisUtterance(cleanForSpeech(text) || " ");
       const v = pickVoice(); if (v) u.voice = v;
-      u.rate = 1.0; u.pitch = 1.15; u.volume = 1.0;
+      u.rate = 1.0; u.pitch = voicePitchFor(v); u.volume = 1.0;
       u.onstart = () => { talking = true; if (!schedTimer) startScheduler(seq, dur); };
       u.onboundary = (e) => { if (typeof e.charIndex === "number") resyncCursor(seq, e.charIndex); };
       u.onend = finish;
@@ -537,6 +549,8 @@ window.ariaAvatar = {
   setVoice(on) { voiceOn = !!on; if (!on) { try { window.speechSynthesis.cancel(); } catch {} } },
   setThinking(on) { thinking = !!on; },
   setListening(on) { listening = !!on; },
+  listVoices() { refreshVoices(); return voices.map((v) => ({ name: v.name, lang: v.lang, default: !!v.default })); },
+  setVoiceName(name) { preferredVoiceName = name || null; },
   get voiceOn() { return voiceOn; },
   get ttsSupported() { return !!(window.speechSynthesis && window.SpeechSynthesisUtterance); },
 };

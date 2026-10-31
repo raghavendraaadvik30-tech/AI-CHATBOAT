@@ -8,13 +8,15 @@ const KEY_STORE = "aria.apiKey";
 const MODEL_STORE = "aria.model";
 const PERSONA_STORE = "aria.persona";
 const VOICE_STORE = "aria.voice";
+const VOICE_NAME_STORE = "aria.voiceName";
 
 const DEFAULT_MODEL = "openai/gpt-4o-mini";
 const DEFAULT_PERSONA =
   "You are Aria, a warm, upbeat and friendly AI companion. " +
   "Keep replies concise, natural and human. Use a little personality and the occasional emoji. " +
-  "When the user shares their camera, an image of what their webcam sees is attached to their message — " +
-  "look at it and answer naturally about what you see (count fingers, describe colours/objects, etc.).";
+  "When the user shares their camera, an image of what their webcam sees is attached to their message. " +
+  "Examine the image carefully before answering. For counting (e.g. fingers), count the clearly visible items one by one and give the exact number. " +
+  "For colours, name the actual colour you see. Be precise and concrete; if the image is blurry or something is not clearly visible, say so briefly rather than guessing.";
 
 // ---- element refs ----
 const el = (id) => document.getElementById(id);
@@ -30,6 +32,7 @@ const modal = el("modal");
 const apiKeyInput = el("apiKey");
 const modelInput = el("model");
 const personaInput = el("persona");
+const voiceSelect = el("voiceSelect");
 
 // ---- conversation state ----
 let history = []; // {role, content}
@@ -56,7 +59,26 @@ function loadSettings() {
   apiKeyInput.value = store.get(KEY_STORE) || "";
   modelInput.value = store.get(MODEL_STORE) || DEFAULT_MODEL;
   personaInput.value = store.get(PERSONA_STORE) || DEFAULT_PERSONA;
+  populateVoices();
 }
+
+// fill the voice dropdown with the browser's installed voices
+function populateVoices() {
+  if (!voiceSelect) return;
+  const chosen = store.get(VOICE_NAME_STORE) || "";
+  const list = window.ariaAvatar?.listVoices?.() || [];
+  voiceSelect.innerHTML = '<option value="">Automatic (male)</option>';
+  for (const v of list) {
+    const o = document.createElement("option");
+    o.value = v.name;
+    o.textContent = `${v.name} (${v.lang})`;
+    if (v.name === chosen) o.selected = true;
+    voiceSelect.appendChild(o);
+  }
+  voiceSelect.value = chosen; // keep "Automatic" if the saved voice isn't present
+}
+// voices can load late — repopulate when the browser reports them
+try { if (window.speechSynthesis) window.speechSynthesis.addEventListener("voiceschanged", populateVoices); } catch {}
 function getKey() { return store.get(KEY_STORE) || ""; }
 function getModel() { return store.get(MODEL_STORE) || DEFAULT_MODEL; }
 function getPersona() { return store.get(PERSONA_STORE) || DEFAULT_PERSONA; }
@@ -73,6 +95,8 @@ saveBtn.addEventListener("click", () => {
   store.set(KEY_STORE, apiKeyInput.value.trim());
   store.set(MODEL_STORE, modelInput.value.trim() || DEFAULT_MODEL);
   store.set(PERSONA_STORE, personaInput.value.trim() || DEFAULT_PERSONA);
+  store.set(VOICE_NAME_STORE, voiceSelect ? voiceSelect.value : "");
+  window.ariaAvatar?.setVoiceName?.(voiceSelect ? voiceSelect.value : "");
 
   const original = saveBtn.textContent;
   saveBtn.textContent = "Saved ✓";
@@ -86,6 +110,13 @@ saveBtn.addEventListener("click", () => {
   }, 550);
 });
 modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
+
+// instant preview when a voice is chosen (the change event is a user gesture)
+voiceSelect?.addEventListener("change", () => {
+  window.ariaAvatar?.setVoiceName?.(voiceSelect.value);
+  window.ariaAvatar?.primeVoice?.();
+  window.ariaAvatar?.speak?.("Hi, this is how I sound.");
+});
 
 // ------------------------------------------------------------------ voice toggle
 const voiceBtn = el("voiceBtn");
@@ -174,7 +205,7 @@ async function askOpenRouter(userText, imageDataUrl = null) {
       role: "user",
       content: [
         { type: "text", text: userText || "What do you see?" },
-        { type: "image_url", image_url: { url: imageDataUrl } },
+        { type: "image_url", image_url: { url: imageDataUrl, detail: "high" } },
       ],
     };
   }
@@ -261,7 +292,10 @@ async function startCamera() {
   }
   camStarting = true;
   try {
-    camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false,
+    });
     cameraEl.srcObject = camStream;
     await cameraEl.play().catch(() => {});
     camPreview.hidden = false;
@@ -289,14 +323,14 @@ function stopCamera() {
 function captureFrame() {
   const v = cameraEl;
   if (!v || !v.videoWidth) return null;
-  const maxW = 640;
+  const maxW = 1024; // higher detail -> better finger/colour/object accuracy
   const scale = Math.min(1, maxW / v.videoWidth);
   const w = Math.round(v.videoWidth * scale);
   const h = Math.round(v.videoHeight * scale);
   const c = document.createElement("canvas");
   c.width = w; c.height = h;
   c.getContext("2d").drawImage(v, 0, 0, w, h);
-  try { return c.toDataURL("image/jpeg", 0.8); } catch { return null; }
+  try { return c.toDataURL("image/jpeg", 0.88); } catch { return null; }
 }
 
 cameraBtn.addEventListener("click", () => { cameraOn ? stopCamera() : startCamera(); });
@@ -380,6 +414,7 @@ if (SR) {
 function init() {
   try { loadSettings(); } catch (e) { /* storage blocked — handled by safe store */ }
   applyVoice(store.get(VOICE_STORE) !== "off"); // default: voice on
+  window.ariaAvatar?.setVoiceName?.(store.get(VOICE_NAME_STORE) || "");
   // No fake greeting — the empty-state hint in #messages guides the user,
   // and the chat only ever shows real user/model exchanges.
 }
