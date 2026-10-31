@@ -14,11 +14,11 @@ moves her **jaw and mouth** while she answers, powered by the
   the full **ARKit 52-blendshape** set, lit with image-based lighting for
   lifelike skin. (No Ready Player Me dependency — that service shut down in
   Jan 2026; assets load from the reliable jsDelivr CDN.)
-- **OpenRouter multilingual speech** — one OpenRouter key handles chat, camera
-  vision, and optional neural speech for English, Kannada, Hindi, Tamil, Telugu,
-  and Malayalam. Automatic mode tries the free browser voice first and uses the
-  Fish Audio `fish-audio/drama-3` model only when the selected language has no
-  local voice.
+- **Sarvam AI Indian-language speech** — Sarvam's Bulbul TTS is the primary
+  voice for Kannada, Hindi, Tamil, Telugu, Malayalam (and more Indian
+  languages), routed through the Node proxy so the key stays server-side.
+  OpenRouter (`fish-audio/drama-3`) is the fallback, and English can use a free
+  local browser voice. Set the provider in Settings → Speech quality.
 - **Waveform-assisted lip-sync** — OpenRouter speech is decoded through Web
   Audio. Exact audio duration controls viseme pacing, while live waveform
   energy closes the mouth during pauses. Kannada and English have detailed
@@ -59,6 +59,7 @@ moves her **jaw and mouth** while she answers, powered by the
    same-origin proxy:
    ```bash
    export STABILITY_API_KEY="your-rotated-stability-key"
+   export SARVAM_API_KEY="your-rotated-sarvam-key"   # Indian-language speech
    npm start
    ```
 2. Open `http://localhost:8000` in Chrome or Edge.

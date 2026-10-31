@@ -8,6 +8,8 @@ const HOST = process.env.HOST || "127.0.0.1";
 const PORT = Number(process.env.PORT || 8000);
 const MAX_JSON_BYTES = 32 * 1024;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
+const SARVAM_LANGS = new Set(["en-IN", "hi-IN", "bn-IN", "kn-IN", "ml-IN", "mr-IN", "od-IN", "pa-IN", "ta-IN", "te-IN", "gu-IN"]);
 const ENGINES = new Set(["core", "ultra"]);
 const ASPECTS = new Set(["1:1", "16:9", "9:16", "4:3", "3:4"]);
 const MIME = {
@@ -146,6 +148,70 @@ async function handleImage(req, res) {
   }
 }
 
+async function handleSarvamSpeech(req, res) {
+  if (req.method !== "POST") return json(res, 405, { error: "Method not allowed" });
+  if (!sameOrigin(req)) return json(res, 403, { error: "Cross-origin requests are not allowed" });
+  if (!String(req.headers["content-type"] || "").startsWith("application/json")) {
+    return json(res, 415, { error: "Expected application/json" });
+  }
+
+  const key = process.env.SARVAM_API_KEY;
+  if (!key) return json(res, 503, { error: "Sarvam proxy is not configured", code: "sarvam_proxy_unconfigured" });
+
+  const body = await readJson(req);
+  const text = typeof body.text === "string" ? body.text.trim() : "";
+  const language = SARVAM_LANGS.has(body.language) ? body.language : "en-IN";
+  if (!text) return json(res, 400, { error: "Text is required" });
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error("upstream timeout")), 45_000);
+  const abortOnClose = () => { if (!res.writableEnded) controller.abort(new Error("client disconnected")); };
+  res.on("close", abortOnClose);
+
+  try {
+    const payload = { text: text.slice(0, 2000), target_language_code: language };
+    if (process.env.SARVAM_MODEL) payload.model = process.env.SARVAM_MODEL;
+    if (process.env.SARVAM_SPEAKER) payload.speaker = process.env.SARVAM_SPEAKER;
+
+    const upstream = await fetch("https://api.sarvam.ai/text-to-speech", {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json", "api-subscription-key": key },
+      body: JSON.stringify(payload),
+    });
+
+    if (!upstream.ok) {
+      const errorBody = await readLimited(upstream, 256 * 1024);
+      return json(res, upstream.status, {
+        error: "Sarvam rejected the speech request",
+        detail: errorBody.toString("utf8").slice(0, 500),
+      });
+    }
+
+    const raw = await readLimited(upstream, MAX_AUDIO_BYTES);
+    let base64;
+    try { base64 = JSON.parse(raw.toString("utf8"))?.audios?.[0]; } catch { base64 = null; }
+    if (!base64) return json(res, 502, { error: "Sarvam returned no audio data" });
+
+    const audio = Buffer.from(base64, "base64");
+    res.writeHead(200, secureHeaders({
+      "Content-Type": "audio/wav",
+      "Content-Length": audio.length,
+      "Cache-Control": "no-store",
+    }));
+    res.end(audio);
+  } catch (error) {
+    if (controller.signal.aborted) {
+      if (!res.headersSent && !res.destroyed) json(res, 504, { error: "Speech generation timed out or was cancelled" });
+      return;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    res.off("close", abortOnClose);
+  }
+}
+
 async function serveStatic(req, res) {
   if (req.method !== "GET" && req.method !== "HEAD") return json(res, 405, { error: "Method not allowed" });
   let pathname;
@@ -176,9 +242,13 @@ async function serveStatic(req, res) {
 const server = http.createServer(async (req, res) => {
   try {
     if (req.url?.split("?")[0] === "/api/capabilities") {
-      return json(res, 200, { imageProxy: Boolean(process.env.STABILITY_API_KEY) });
+      return json(res, 200, {
+        imageProxy: Boolean(process.env.STABILITY_API_KEY),
+        sarvamProxy: Boolean(process.env.SARVAM_API_KEY),
+      });
     }
     if (req.url?.split("?")[0] === "/api/stability/generate") return await handleImage(req, res);
+    if (req.url?.split("?")[0] === "/api/sarvam/speech") return await handleSarvamSpeech(req, res);
     return await serveStatic(req, res);
   } catch (error) {
     if (!res.headersSent) json(res, error.status || 500, { error: error.status ? error.message : "Internal server error" });
@@ -189,4 +259,5 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`Aria running at http://${HOST}:${PORT}`);
   console.log(process.env.STABILITY_API_KEY ? "Stability proxy enabled" : "Stability proxy disabled (set STABILITY_API_KEY or use browser fallback)");
+  console.log(process.env.SARVAM_API_KEY ? "Sarvam speech proxy enabled" : "Sarvam speech proxy disabled (set SARVAM_API_KEY or use browser fallback)");
 });

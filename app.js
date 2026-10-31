@@ -10,6 +10,7 @@ const VOICE_NAME_STORE = "aria.voiceName";
 const LANGUAGE_STORE = "aria.language";
 const TTS_MODE_STORE = "aria.ttsMode";
 const TTS_MODEL_STORE = "aria.ttsModel";
+const SARVAM_KEY_STORE = "aria.sarvamApiKey";
 const STABILITY_KEY_STORE = "aria.stabilityApiKey";
 const IMAGE_ENGINE_STORE = "aria.imageEngine";
 const IMAGE_ASPECT_STORE = "aria.imageAspect";
@@ -83,6 +84,7 @@ const statusText = el("statusText");
 const speechProvider = el("speechProvider");
 const modal = el("modal");
 const apiKeyInput = el("apiKey");
+const sarvamApiKeyInput = el("sarvamApiKey");
 const stabilityApiKeyInput = el("stabilityApiKey");
 const modelInput = el("model");
 const personaInput = el("persona");
@@ -137,6 +139,7 @@ function removeRetiredProviderData() {
 }
 
 function getKey() { return store.get(KEY_STORE) || ""; }
+function getSarvamKey() { return store.get(SARVAM_KEY_STORE) || ""; }
 function getStabilityKey() { return store.get(STABILITY_KEY_STORE) || ""; }
 function getImageEngine() { return store.get(IMAGE_ENGINE_STORE) || "core"; }
 function getImageAspect() { return store.get(IMAGE_ASPECT_STORE) || "1:1"; }
@@ -144,7 +147,7 @@ function getModel() { return store.get(MODEL_STORE) || DEFAULT_MODEL; }
 function getPersona() { return store.get(PERSONA_STORE) || DEFAULT_PERSONA; }
 function getTtsMode() {
   const mode = store.get(TTS_MODE_STORE) || "auto";
-  return mode === "browser" || mode === "openrouter" ? mode : "auto";
+  return ["browser", "openrouter", "sarvam"].includes(mode) ? mode : "auto";
 }
 function getTtsModel() {
   const stored = store.get(TTS_MODEL_STORE) || "";
@@ -195,6 +198,7 @@ function populateVoices() {
 
 function loadSettings() {
   apiKeyInput.value = getKey();
+  sarvamApiKeyInput.value = getSarvamKey();
   stabilityApiKeyInput.value = getStabilityKey();
   modelInput.value = getModel();
   personaInput.value = getPersona();
@@ -239,11 +243,12 @@ const saveBtn = el("saveSettings");
 saveBtn.addEventListener("click", () => {
   const language = LANGUAGES[languageSelect.value] ? languageSelect.value : "en-IN";
   store.set(KEY_STORE, apiKeyInput.value.trim());
+  store.set(SARVAM_KEY_STORE, sarvamApiKeyInput.value.trim());
   store.set(STABILITY_KEY_STORE, stabilityApiKeyInput.value.trim());
   store.set(MODEL_STORE, modelInput.value.trim() || DEFAULT_MODEL);
   store.set(PERSONA_STORE, personaInput.value.trim() || DEFAULT_PERSONA);
   store.set(LANGUAGE_STORE, language);
-  store.set(TTS_MODE_STORE, ["auto", "browser", "openrouter"].includes(ttsModeSelect.value) ? ttsModeSelect.value : "auto");
+  store.set(TTS_MODE_STORE, ["auto", "browser", "openrouter", "sarvam"].includes(ttsModeSelect.value) ? ttsModeSelect.value : "auto");
   store.set(TTS_MODEL_STORE, ttsModelInput.value.trim() || DEFAULT_TTS_MODEL);
   store.set(IMAGE_ENGINE_STORE, imageEngineSelect.value || "core");
   store.set(IMAGE_ASPECT_STORE, imageAspectSelect.value || "1:1");
@@ -807,6 +812,54 @@ async function askOpenRouter(text, frames, turn) {
   return reply;
 }
 
+async function fetchSarvamSpeech(text, turn, signal = turn.controller.signal) {
+  const language = turn.language || "en-IN";
+
+  // Preferred same-origin proxy: keeps the key server-side and avoids CORS.
+  if (location.protocol !== "file:") {
+    const proxy = await fetch("/api/sarvam/speech", {
+      method: "POST",
+      signal,
+      headers: { "Content-Type": "application/json", Accept: "audio/wav, application/json" },
+      body: JSON.stringify({ text, language }),
+    });
+    if (proxy.ok) return proxy.arrayBuffer();
+    let body = {};
+    try { body = await proxy.json(); } catch {}
+    const unavailable = proxy.status === 404 || proxy.status === 405 || proxy.status === 501
+      || (proxy.status === 503 && body.code === "sarvam_proxy_unconfigured");
+    if (!unavailable) throw new Error(`Sarvam proxy ${proxy.status}: ${body.detail || body.error || "request failed"}`);
+  }
+
+  const key = getSarvamKey();
+  if (!key) throw new Error("Sarvam key is not configured");
+  let response;
+  try {
+    response = await fetch("https://api.sarvam.ai/text-to-speech", {
+      method: "POST",
+      signal,
+      headers: { "Content-Type": "application/json", "api-subscription-key": key },
+      body: JSON.stringify({ text: text.slice(0, 2000), target_language_code: language }),
+    });
+  } catch (error) {
+    if (error?.name === "TypeError") {
+      throw new Error("Direct Sarvam request was blocked by the browser (CORS). Run npm start with SARVAM_API_KEY to use the proxy.");
+    }
+    throw error;
+  }
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Sarvam speech ${response.status}: ${detail.slice(0, 180)}`);
+  }
+  const data = await response.json();
+  const base64 = data?.audios?.[0];
+  if (!base64) throw new Error("Sarvam returned no audio data");
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
 async function fetchOpenRouterSpeech(text, turn, signal = turn.controller.signal) {
   const response = await fetch("https://openrouter.ai/api/v1/audio/speech", {
     method: "POST",
@@ -853,13 +906,35 @@ async function runSpeechProvider(provider, label, timeoutMs, text, turn) {
 }
 
 async function fetchNeuralSpeech(text, turn) {
-  const audio = await runSpeechProvider(fetchOpenRouterSpeech, "OpenRouter", 40_000, text, turn);
-  return { audio, provider: "OpenRouter" };
+  const mode = getTtsMode();
+  const sarvam = [fetchSarvamSpeech, "Sarvam", 40_000];
+  const openrouter = [fetchOpenRouterSpeech, "OpenRouter", 40_000];
+  let order;
+  if (mode === "openrouter") order = [openrouter, sarvam];
+  else if (mode === "sarvam") order = [sarvam, openrouter];
+  else order = [sarvam, openrouter]; // auto: Sarvam leads for all supported languages
+
+  const errors = [];
+  for (const [fn, name, ms] of order) {
+    try {
+      const audio = await runSpeechProvider(fn, name, ms, text, turn);
+      return { audio, provider: name };
+    } catch (error) {
+      if (error?.name === "AbortError") throw error;
+      errors.push(error.message || String(error));
+    }
+  }
+  throw new Error(errors.join(" | "));
 }
 
 function shouldUseNeuralSpeech(language) {
   const mode = getTtsMode();
-  return mode === "openrouter" || (mode === "auto" && !hasVoiceForLanguage(language));
+  if (mode === "browser") return false;
+  if (mode === "openrouter" || mode === "sarvam") return true;
+  // auto: Indian-script languages rarely have local voices, so use neural;
+  // English falls back to a free local voice when the device has one.
+  if (language !== "en-IN") return true;
+  return !hasVoiceForLanguage(language);
 }
 
 function typeOut(text, turn) {
