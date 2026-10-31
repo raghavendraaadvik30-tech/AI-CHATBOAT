@@ -46,6 +46,30 @@ const LANGUAGES = {
     online: "ಆನ್‌ಲೈನ್",
     preview: "ನಮಸ್ಕಾರ, ಇದು ನನ್ನ ಧ್ವನಿ.",
   },
+  "hi-IN": {
+    label: "हिन्दी (Hindi)",
+    replyRule: "Reply in natural conversational Hindi using Devanagari script unless the user explicitly requests another language.",
+    listening: "सुन रहा हूँ…", thinking: "सोच रहा हूँ…", speaking: "बोल रहा हूँ…", online: "ऑनलाइन",
+    preview: "नमस्ते, यह मेरी आवाज़ है।",
+  },
+  "ta-IN": {
+    label: "தமிழ் (Tamil)",
+    replyRule: "Reply in natural conversational Tamil using Tamil script unless the user explicitly requests another language.",
+    listening: "கேட்கிறேன்…", thinking: "யோசிக்கிறேன்…", speaking: "பேசுகிறேன்…", online: "ஆன்லைன்",
+    preview: "வணக்கம், இது என் குரல்.",
+  },
+  "te-IN": {
+    label: "తెలుగు (Telugu)",
+    replyRule: "Reply in natural conversational Telugu using Telugu script unless the user explicitly requests another language.",
+    listening: "వింటున్నాను…", thinking: "ఆలోచిస్తున్నాను…", speaking: "మాట్లాడుతున్నాను…", online: "ఆన్‌లైన్",
+    preview: "నమస్కారం, ఇది నా స్వరం.",
+  },
+  "ml-IN": {
+    label: "മലയാളം (Malayalam)",
+    replyRule: "Reply in natural conversational Malayalam using Malayalam script unless the user explicitly requests another language.",
+    listening: "കേൾക്കുന്നു…", thinking: "ആലോചിക്കുന്നു…", speaking: "സംസാരിക്കുന്നു…", online: "ഓൺലൈൻ",
+    preview: "നമസ്കാരം, ഇതാണ് എന്റെ ശബ്ദം.",
+  },
 };
 
 const el = (id) => document.getElementById(id);
@@ -61,6 +85,7 @@ const cameraBtn = el("cameraBtn");
 const voiceBtn = el("voiceBtn");
 const statusPill = el("statusPill");
 const statusText = el("statusText");
+const speechProvider = el("speechProvider");
 const modal = el("modal");
 const apiKeyInput = el("apiKey");
 const googleApiKeyInput = el("googleApiKey");
@@ -265,6 +290,12 @@ voiceBtn.addEventListener("click", () => {
 });
 
 // ------------------------------------------------------------------ phase/UI
+function setSpeechProvider(label, state = "ready") {
+  const dot = document.createElement("span");
+  speechProvider.replaceChildren(dot, document.createTextNode(label));
+  speechProvider.dataset.state = state;
+}
+
 function setPhase(next) {
   phase = next;
   document.body.dataset.phase = next;
@@ -790,14 +821,14 @@ function pcm16ToWav(pcm, sampleRate = 24000, channels = 1) {
   return wav.buffer;
 }
 
-async function fetchSonexSpeech(text, turn) {
+async function fetchSonexSpeech(text, turn, signal = turn.controller.signal) {
   const voiceId = getSonexVoiceId();
 
   // Preferred same-origin proxy: avoids CORS and keeps the key server-side.
   if (location.protocol !== "file:") {
     const proxy = await fetch("/api/sonex/speech", {
       method: "POST",
-      signal: turn.controller.signal,
+      signal,
       headers: { "Content-Type": "application/json", Accept: "audio/wav, application/json" },
       body: JSON.stringify({ text, voiceId }),
     });
@@ -816,7 +847,7 @@ async function fetchSonexSpeech(text, turn) {
   try {
     const response = await fetch("https://api.sonexlabs.com/v1/speech/stream", {
       method: "POST",
-      signal: turn.controller.signal,
+      signal,
       headers: {
         Authorization: `Bearer ${key}`,
         "Content-Type": "application/json",
@@ -842,13 +873,13 @@ async function fetchSonexSpeech(text, turn) {
   }
 }
 
-async function fetchGoogleSpeech(text, turn) {
+async function fetchGoogleSpeech(text, turn, signal = turn.controller.signal) {
   const key = getGoogleKey();
   if (!key) throw new Error("Google Gemini key is not configured");
   const model = encodeURIComponent(getGoogleTtsModel());
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: "POST",
-    signal: turn.controller.signal,
+    signal,
     headers: { "Content-Type": "application/json", "x-goog-api-key": key },
     body: JSON.stringify({
       contents: [{ role: "user", parts: [{ text }] }],
@@ -877,10 +908,10 @@ async function fetchGoogleSpeech(text, turn) {
   return bytes.buffer;
 }
 
-async function fetchOpenRouterSpeech(text, turn) {
+async function fetchOpenRouterSpeech(text, turn, signal = turn.controller.signal) {
   const response = await fetch("https://openrouter.ai/api/v1/audio/speech", {
     method: "POST",
-    signal: turn.controller.signal,
+    signal,
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${getKey()}`,
@@ -902,22 +933,48 @@ async function fetchOpenRouterSpeech(text, turn) {
   return response.arrayBuffer();
 }
 
+async function runSpeechProvider(provider, label, timeoutMs, text, turn) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const abortFromTurn = () => controller.abort("turn cancelled");
+  turn.controller.signal.addEventListener("abort", abortFromTurn, { once: true });
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort("provider timeout");
+  }, timeoutMs);
+  try {
+    return await provider(text, turn, controller.signal);
+  } catch (error) {
+    if (turn.controller.signal.aborted) throw new DOMException("Cancelled", "AbortError");
+    if (timedOut) throw new Error(`${label} speech timed out after ${Math.round(timeoutMs / 1000)}s`);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    turn.controller.signal.removeEventListener("abort", abortFromTurn);
+  }
+}
+
 async function fetchNeuralSpeech(text, turn) {
   const mode = getTtsMode();
+  const isKannada = turn.language === "kn-IN";
+  const automatic = isKannada
+    ? [fetchSonexSpeech, fetchOpenRouterSpeech, fetchGoogleSpeech]
+    : [fetchOpenRouterSpeech, fetchSonexSpeech, fetchGoogleSpeech];
   const orders = {
     sonex: [fetchSonexSpeech, fetchOpenRouterSpeech, fetchGoogleSpeech],
-    google: [fetchGoogleSpeech, fetchSonexSpeech, fetchOpenRouterSpeech],
+    google: [fetchGoogleSpeech, fetchOpenRouterSpeech, fetchSonexSpeech],
     openrouter: [fetchOpenRouterSpeech, fetchSonexSpeech, fetchGoogleSpeech],
-    auto: [fetchSonexSpeech, fetchGoogleSpeech, fetchOpenRouterSpeech],
-    browser: [fetchSonexSpeech, fetchOpenRouterSpeech, fetchGoogleSpeech],
+    auto: automatic,
+    browser: automatic,
   };
-  const providers = orders[mode] || orders.auto;
+  const providers = orders[mode] || automatic;
   const errors = [];
   for (const provider of providers) {
+    const providerName = provider === fetchSonexSpeech ? "SonexLabs"
+      : provider === fetchGoogleSpeech ? "Google" : "OpenRouter";
+    const timeoutMs = provider === fetchSonexSpeech ? 30_000 : 40_000;
     try {
-      const audio = await provider(text, turn);
-      const providerName = provider === fetchSonexSpeech ? "SonexLabs"
-        : provider === fetchGoogleSpeech ? "Google" : "OpenRouter";
+      const audio = await runSpeechProvider(provider, providerName, timeoutMs, text, turn);
       return { audio, provider: providerName };
     } catch (error) {
       if (error?.name === "AbortError") throw error;
@@ -1004,10 +1061,12 @@ async function runTurn(text) {
 
     let neuralSpeech = null;
     if (shouldUseNeuralSpeech(turn.language)) {
+      setSpeechProvider("Connecting voice…", "loading");
       try {
         neuralSpeech = await fetchNeuralSpeech(reply, turn);
       } catch (error) {
         if (error?.name === "AbortError") throw error;
+        setSpeechProvider("Browser fallback", "warning");
         toast("Neural speech failed; trying the browser voice. " + (error.message || ""), "error", 10000);
       }
     }
@@ -1016,6 +1075,7 @@ async function runTurn(text) {
     showTyping(false);
     setPhase("speaking");
     window.ariaAvatar?.setLanguage?.(turn.language);
+    setSpeechProvider(neuralSpeech?.provider ? `${neuralSpeech.provider} voice` : "Browser voice", neuralSpeech ? "active" : "warning");
     const speech = neuralSpeech?.audio && window.ariaAvatar?.speakAudio
       ? window.ariaAvatar.speakAudio(reply, neuralSpeech.audio)
       : (window.ariaAvatar?.speak?.(reply) || Promise.resolve());
@@ -1197,6 +1257,7 @@ function init() {
   document.documentElement.lang = getLanguage();
   applyVoice(store.get(VOICE_STORE) !== "off");
   syncAvatarSettings();
+  setSpeechProvider("Automatic voice");
   setPhase("idle");
 }
 init();

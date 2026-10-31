@@ -18,9 +18,14 @@ moves her **jaw and mouth** while she answers, powered by the
   provider for low-latency multilingual output, followed by Google Gemini,
   OpenRouter, and the browser voice. Kannada text is auto-detected by Sonex;
   an optional voice ID can select a specific SonexLabs voice.
+- **Language-aware provider routing** — Kannada tries SonexLabs, OpenRouter,
+  then Google. English, Hindi, Tamil, Telugu, and Malayalam try OpenRouter first,
+  followed by SonexLabs and Google. Every provider has a finite deadline so an
+  exhausted or unconfigured service cannot leave the avatar silent forever.
 - **Waveform-assisted lip-sync** — neural speech is decoded through Web Audio.
   Exact audio duration controls viseme pacing, while live waveform energy closes
-  the mouth during pauses and scales jaw movement during voiced syllables.
+  the mouth during pauses. Kannada and English have detailed mouth maps; other
+  scripts use a waveform-driven universal jaw/lip fallback.
 - **No-echo live conversation** — 📞 starts a coordinated half-duplex call:
   listen → think → speak → acoustic pause → listen. The microphone is closed
   while Aria speaks, which prevents speaker output from feeding back as a new
@@ -63,9 +68,9 @@ moves her **jaw and mouth** while she answers, powered by the
 3. Click **⚙ settings** and add any keys not supplied to the server. OpenRouter
    handles chat/vision, SonexLabs is primary Kannada speech, Google and
    OpenRouter provide speech fallbacks, and Stability AI generates images.
-4. Tap 📞 for a no-echo conversation or 🎤 for one voice turn. Ask “generate
-   an image of…” by text or voice to route that request automatically to
-   Stability AI; the picture button remains available as a manual shortcut.
+4. Choose English, Kannada, Hindi, Tamil, Telugu, or Malayalam. Tap 📞 for a
+   no-echo conversation or 🎤 for one voice turn. Ask “generate an image of…”
+   by text or voice to route that request automatically to Stability AI.
 
 Your keys are stored in the browser's `localStorage` only when entered in
 Settings. Server environment keys stay server-side. OpenRouter, Google,

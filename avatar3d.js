@@ -758,12 +758,17 @@ function animate() {
     // mouth: lip-sync viseme, or procedural fallback
     const speaking = talking || currentViseme;
     mouthGain += ((speaking ? 1 : 0) - mouthGain) * Math.min(1, dt * 12);
-    if (currentViseme) {
+    const visemeEntries = currentViseme ? Object.entries(currentViseme) : [];
+    if (visemeEntries.length) {
       const waveformGain = cloudAudioActive
         ? THREE.MathUtils.clamp(0.08 + audioEnergy * 1.45, 0.08, 1.15)
         : 1;
-      for (const [k, v] of Object.entries(currentViseme)) setT(k, v * mouthGain * waveformGain);
-    } else if (talking) {
+      for (const [k, v] of visemeEntries) setT(k, v * mouthGain * waveformGain);
+    } else if (cloudAudioActive && audioEnergy > 0.015) {
+      // Universal fallback for scripts without a detailed grapheme map.
+      setT("jawOpen", audioEnergy * 0.42 * mouthGain);
+      setT("mouthFunnel", audioEnergy * 0.08 * mouthGain);
+    } else if (talking && !cloudAudioActive) {
       const open = 0.1 + 0.16 * (0.5 + 0.5 * Math.sin(t * 13)) + 0.07 * Math.sin(t * 21 + 1);
       setT("jawOpen", open * mouthGain);
       setT("mouthFunnel", 0.1 * (0.5 + 0.5 * Math.sin(t * 8)) * mouthGain);
