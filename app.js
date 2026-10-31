@@ -38,6 +38,7 @@ const voiceSelect = el("voiceSelect");
 let history = []; // {role, content}
 let liveMode = false;   // hands-free continuous voice conversation
 let processing = false; // a turn (send -> reply -> speak) is in progress
+let currentController = null; // lets "stop" abort an in-flight request
 
 // ------------------------------------------------------------------ safe store
 // Some browsers throw a SecurityError when touching localStorage on a file://
@@ -216,10 +217,12 @@ async function askOpenRouter(userText, imageDataUrl = null) {
 
   setStatus("Thinking…", true);
   showTyping(true);
+  currentController = new AbortController();
 
   try {
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
+      signal: currentController.signal,
       headers: {
         "Content-Type": "application/json",
         Authorization: "Bearer " + key,
@@ -255,7 +258,10 @@ async function askOpenRouter(userText, imageDataUrl = null) {
     showTyping(false);
     stopTalking();
     setStatus("Online");
+    if (err && err.name === "AbortError") return; // user said "stop" — not an error
     toast("Network error: " + err.message, "error", 10000);
+  } finally {
+    currentController = null;
   }
 }
 
@@ -374,9 +380,9 @@ function stopListening() {
 }
 
 function startListening() {
-  if (!recog) return;
-  // Don't let Aria's own voice bleed into the mic.
-  try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
+  if (!recog || listening) return;
+  if (!liveMode) { try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {} }
+  recog.continuous = liveMode;  // live keeps listening (so you can barge-in with "stop")
   input.value = "";
   input.placeholder = "Listening… speak now";
   listening = true;
@@ -384,6 +390,17 @@ function startListening() {
   window.ariaAvatar?.setListening?.(true);
   setStatus("Listening…");
   try { recog.start(); } catch {}
+}
+
+// spoken commands
+const STOP_RE = /\b(stop|wait|hold on|enough|shut up|cancel|pause|quiet)\b/i;
+const EXIT_RE = /\b(exit|good ?bye|bye|end call|hang ?up|quit|stop conversation)\b/i;
+function isShort(t) { return t.trim().split(/\s+/).length <= 3; }
+
+function interruptSpeech() {
+  try { currentController && currentController.abort(); } catch {}
+  window.ariaAvatar?.stopTalking?.(); // cancels speech + resolves the turn
+  setStatus("Listening…");
 }
 
 if (SR) {
@@ -394,14 +411,27 @@ if (SR) {
   recog.maxAlternatives = 1;
 
   recog.onresult = (e) => {
-    let txt = "";
-    for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
-    input.value = txt;
     const last = e.results[e.results.length - 1];
-    if (last && last.isFinal) {
-      stopListening();
-      sendText(txt);
+    const txt = ((last && last[0] && last[0].transcript) || "").trim();
+    if (!txt) return;
+
+    if (liveMode) {
+      // "exit"/"bye" ends the live call at any time
+      if (EXIT_RE.test(txt) && isShort(txt) && (last.isFinal || processing)) { stopLive(); return; }
+      // while Aria is replying/speaking: only listen for a "stop" barge-in, ignore the rest (echo)
+      if (processing) {
+        if (STOP_RE.test(txt) && isShort(txt)) interruptSpeech();
+        return;
+      }
+      // normal turn
+      input.value = txt;
+      if (last.isFinal) { input.value = ""; sendText(txt); }
+      return;
     }
+
+    // push-to-talk (single utterance)
+    input.value = txt;
+    if (last.isFinal) { stopListening(); sendText(txt); }
   };
   recog.onerror = (e) => {
     stopListening();

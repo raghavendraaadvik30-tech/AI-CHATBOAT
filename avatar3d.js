@@ -100,8 +100,12 @@ let talking = false;
 let currentViseme = null;
 let mouthGain = 0;
 let emotion = {};
-let schedTimer = null, speakTimeout = null, cursor = 0;
+let speakTimeout = null;
 let primed = false, keepAlive = null;
+let pendingFinish = null;
+// lip-sync timing: track real speech pace from word-boundary events
+let seqG = null, speechActive = false;
+let charsPerMs = 0.05, anchorTime = 0, anchorChar = 0, lastBoundaryChar = -1, lastBoundaryTime = 0;
 
 let gazeX = 0, gazeY = 0, gazeTX = 0, gazeTY = 0, nextGaze = 1.5;
 let sacX = 0, sacY = 0;
@@ -205,21 +209,28 @@ function setEmotionFromText(text) {
   }
 }
 
-// -------------------------------------------------------------- lip-sync scheduler
-function stopScheduler() { if (schedTimer) { clearInterval(schedTimer); schedTimer = null; } }
-function startScheduler(seq, dur) {
-  stopScheduler();
-  cursor = 0;
-  const step = Math.max(55, Math.min(115, dur / Math.max(1, seq.length)));
-  schedTimer = setInterval(() => {
-    if (cursor >= seq.length) { currentViseme = VISEMES.sil; return; }
-    currentViseme = VISEMES[seq[cursor].v] || VISEMES.sil;
-    cursor++;
-  }, step);
+// -------------------------------------------------------------- lip-sync (rate-tracked)
+// Instead of a fixed timer, the current viseme is derived each frame from an
+// estimated character position. The estimate advances at charsPerMs, which is
+// continuously corrected by real onboundary events -> lips track the voice.
+function startSpeechSync(seq, dur) {
+  seqG = seq;
+  const totalChars = seq.length ? seq[seq.length - 1].start + 1 : 1;
+  charsPerMs = Math.max(0.005, totalChars / Math.max(1, dur));
+  anchorTime = performance.now(); anchorChar = 0;
+  lastBoundaryChar = -1; lastBoundaryTime = 0;
+  speechActive = true;
 }
-function resyncCursor(seq, charIndex) {
-  for (let i = 0; i < seq.length; i++) if (seq[i].start >= charIndex) { cursor = i; return; }
+function onBoundary(charIndex) {
+  const now = performance.now();
+  if (lastBoundaryTime && charIndex > lastBoundaryChar) {
+    const r = (charIndex - lastBoundaryChar) / (now - lastBoundaryTime); // chars/ms
+    if (isFinite(r) && r > 0) charsPerMs = charsPerMs * 0.5 + r * 0.5;    // smooth
+  }
+  lastBoundaryChar = charIndex; lastBoundaryTime = now;
+  anchorChar = charIndex; anchorTime = now; // re-anchor to the real position
 }
+function stopSpeechSync() { speechActive = false; seqG = null; currentViseme = null; }
 
 // -------------------------------------------------------------- voices
 let voices = [];
@@ -268,11 +279,12 @@ function primeVoice() {
 function stopKeepAlive() { if (keepAlive) { clearInterval(keepAlive); keepAlive = null; } }
 
 function cancelSpeak() {
-  stopScheduler();
+  stopSpeechSync();
   stopKeepAlive();
   if (speakTimeout) { clearTimeout(speakTimeout); speakTimeout = null; }
   try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
   talking = false; currentViseme = null;
+  if (pendingFinish) { const f = pendingFinish; pendingFinish = null; f(); } // resolve an interrupted turn
 }
 
 function speak(text) {
@@ -286,23 +298,25 @@ function speak(text) {
     let done = false;
     const finish = () => {
       if (done) return; done = true;
-      stopScheduler(); stopKeepAlive();
+      pendingFinish = null;
+      stopSpeechSync(); stopKeepAlive();
       if (speakTimeout) { clearTimeout(speakTimeout); speakTimeout = null; }
       talking = false; currentViseme = null;
       resolve();
     };
+    pendingFinish = finish;
 
     const canSpeak = voiceOn && ss && window.SpeechSynthesisUtterance;
-    // Always drive the mouth immediately so lips move even if audio lags/fails.
+    // drive the mouth immediately so lips move even if audio lags/fails
     talking = true;
-    startScheduler(seq, dur);
+    startSpeechSync(seq, dur);
 
     if (canSpeak) {
       const u = new SpeechSynthesisUtterance(cleanForSpeech(text) || " ");
       const v = pickVoice(); if (v) u.voice = v;
       u.rate = 1.0; u.pitch = voicePitchFor(v); u.volume = 1.0;
-      u.onstart = () => { talking = true; if (!schedTimer) startScheduler(seq, dur); };
-      u.onboundary = (e) => { if (typeof e.charIndex === "number") resyncCursor(seq, e.charIndex); };
+      u.onstart = () => { talking = true; if (!speechActive) startSpeechSync(seq, dur); };
+      u.onboundary = (e) => { if (typeof e.charIndex === "number") onBoundary(e.charIndex); };
       u.onend = finish;
       u.onerror = finish;
       try {
@@ -487,6 +501,14 @@ function animate() {
     gazeX += (gazeTX - gazeX) * Math.min(1, dt * 10);
     gazeY += (gazeTY - gazeY) * Math.min(1, dt * 10);
     applyGaze();
+
+    // derive the current viseme from the live-estimated speech position
+    if (speechActive && seqG && seqG.length) {
+      const est = anchorChar + (performance.now() - anchorTime) * charsPerMs;
+      let vi = 0;
+      for (let i = 0; i < seqG.length; i++) { if (seqG[i].start <= est) vi = i; else break; }
+      currentViseme = VISEMES[seqG[vi].v] || VISEMES.sil;
+    }
 
     // mouth: lip-sync viseme, or procedural fallback
     const speaking = talking || currentViseme;
