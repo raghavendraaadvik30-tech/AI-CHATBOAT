@@ -1,7 +1,5 @@
 // ========================================================================
-// Aria — AI Avatar Chat
-// A small, dependency-free chat client for OpenRouter with an animated
-// SVG avatar that blinks, breathes, and "talks" while responding.
+// Aria — chat, camera vision, bilingual speech and half-duplex live calls
 // ========================================================================
 
 const KEY_STORE = "aria.apiKey";
@@ -9,154 +7,232 @@ const MODEL_STORE = "aria.model";
 const PERSONA_STORE = "aria.persona";
 const VOICE_STORE = "aria.voice";
 const VOICE_NAME_STORE = "aria.voiceName";
+const LANGUAGE_STORE = "aria.language";
 
 const DEFAULT_MODEL = "openai/gpt-4o-mini";
 const DEFAULT_PERSONA =
-  "You are Aria, a warm, upbeat and friendly AI companion. " +
-  "Keep replies concise, natural and human. Use a little personality and the occasional emoji. " +
-  "When the user shares their camera, an image of what their webcam sees is attached to their message. " +
-  "Examine the image carefully before answering. For counting (e.g. fingers), count the clearly visible items one by one and give the exact number. " +
-  "For colours, name the actual colour you see. Be precise and concrete; if the image is blurry or something is not clearly visible, say so briefly rather than guessing.";
+  "You are Aria, a warm, natural and concise AI companion. " +
+  "When camera frames are attached, inspect them carefully before answering. " +
+  "For counting, count only clearly visible items. For colours and objects, be precise. " +
+  "If the view is unclear, say that briefly instead of guessing.";
 
-// ---- element refs ----
+const LANGUAGES = {
+  "en-IN": {
+    label: "English (India)",
+    replyRule: "Reply in natural conversational English unless the user explicitly requests another language.",
+    listening: "Listening…",
+    thinking: "Thinking…",
+    speaking: "Speaking…",
+    online: "Online",
+    preview: "Hello, this is how I sound.",
+  },
+  "kn-IN": {
+    label: "ಕನ್ನಡ (Kannada)",
+    replyRule: "Reply in natural conversational Kannada using Kannada script unless the user explicitly requests another language.",
+    listening: "ಕೇಳುತ್ತಿದ್ದೇನೆ…",
+    thinking: "ಯೋಚಿಸುತ್ತಿದ್ದೇನೆ…",
+    speaking: "ಮಾತನಾಡುತ್ತಿದ್ದೇನೆ…",
+    online: "ಆನ್‌ಲೈನ್",
+    preview: "ನಮಸ್ಕಾರ, ಇದು ನನ್ನ ಧ್ವನಿ.",
+  },
+};
+
 const el = (id) => document.getElementById(id);
 const messagesBox = el("messages");
 const typing = el("typing");
 const composer = el("composer");
 const input = el("input");
 const sendBtn = el("sendBtn");
+const micBtn = el("micBtn");
+const callBtn = el("callBtn");
+const stopBtn = el("stopBtn");
+const cameraBtn = el("cameraBtn");
+const voiceBtn = el("voiceBtn");
 const statusPill = el("statusPill");
 const statusText = el("statusText");
-
 const modal = el("modal");
 const apiKeyInput = el("apiKey");
 const modelInput = el("model");
 const personaInput = el("persona");
 const voiceSelect = el("voiceSelect");
+const languageSelect = el("languageSelect");
+const toastsBox = el("toasts");
+const cameraEl = el("camera");
+const camPreview = el("camPreview");
 
-// ---- conversation state ----
-let history = []; // {role, content}
-let liveMode = false;   // hands-free continuous voice conversation
-let processing = false; // a turn (send -> reply -> speak) is in progress
-let currentController = null; // lets "stop" abort an in-flight request
-let speakGuardUntil = 0;      // ignore stray "stop" during thinking + first moment of speech
-let turnCooldownUntil = 0;    // ignore her echo tail right after she finishes
+let history = [];
+let phase = "idle"; // idle | listening | thinking | speaking | stopping
+let liveMode = false;
+let callSession = 0;
+let turnSequence = 0;
+let activeTurn = null;
+let recognition = null;
+let recognitionToken = 0;
+let listenTimer = null;
 
 // ------------------------------------------------------------------ safe store
-// Some browsers throw a SecurityError when touching localStorage on a file://
-// page (or when storage is disabled). Fall back to an in-memory store so the
-// app never crashes — settings just won't persist across reloads in that case.
 const memStore = {};
 let storageWorks = true;
 const store = {
-  get(k) {
-    try { return localStorage.getItem(k); }
-    catch { storageWorks = false; return k in memStore ? memStore[k] : null; }
+  get(key) {
+    if (!storageWorks) return key in memStore ? memStore[key] : null;
+    try { return localStorage.getItem(key); }
+    catch { storageWorks = false; return key in memStore ? memStore[key] : null; }
   },
-  set(k, v) {
-    try { localStorage.setItem(k, v); }
-    catch { storageWorks = false; memStore[k] = v; }
+  set(key, value) {
+    if (!storageWorks) { memStore[key] = value; return; }
+    try { localStorage.setItem(key, value); }
+    catch { storageWorks = false; memStore[key] = value; }
   },
 };
 
-// ------------------------------------------------------------------ settings
-function loadSettings() {
-  apiKeyInput.value = store.get(KEY_STORE) || "";
-  modelInput.value = store.get(MODEL_STORE) || DEFAULT_MODEL;
-  personaInput.value = store.get(PERSONA_STORE) || DEFAULT_PERSONA;
-  populateVoices();
-}
-
-// fill the voice dropdown with the browser's installed voices
-function populateVoices() {
-  if (!voiceSelect) return;
-  const chosen = store.get(VOICE_NAME_STORE) || "";
-  const list = window.ariaAvatar?.listVoices?.() || [];
-  voiceSelect.innerHTML = '<option value="">Automatic (male)</option>';
-  for (const v of list) {
-    const o = document.createElement("option");
-    o.value = v.name;
-    o.textContent = `${v.name} (${v.lang})`;
-    if (v.name === chosen) o.selected = true;
-    voiceSelect.appendChild(o);
-  }
-  voiceSelect.value = chosen; // keep "Automatic" if the saved voice isn't present
-}
-// voices can load late — repopulate when the browser reports them
-try { if (window.speechSynthesis) window.speechSynthesis.addEventListener("voiceschanged", populateVoices); } catch {}
 function getKey() { return store.get(KEY_STORE) || ""; }
 function getModel() { return store.get(MODEL_STORE) || DEFAULT_MODEL; }
 function getPersona() { return store.get(PERSONA_STORE) || DEFAULT_PERSONA; }
+function getLanguage() {
+  const value = store.get(LANGUAGE_STORE) || "en-IN";
+  return LANGUAGES[value] ? value : "en-IN";
+}
+function langCopy() { return LANGUAGES[getLanguage()]; }
+
+// ------------------------------------------------------------------ settings
+function listBrowserVoices() {
+  const fromAvatar = window.ariaAvatar?.listVoices?.();
+  if (fromAvatar?.length) return fromAvatar;
+  try {
+    return (window.speechSynthesis?.getVoices?.() || []).map((voice) => ({
+      name: voice.name,
+      lang: voice.lang,
+      default: Boolean(voice.default),
+    }));
+  } catch { return []; }
+}
+
+function hasVoiceForLanguage(language) {
+  const base = language.split("-")[0].toLowerCase();
+  return listBrowserVoices().some((voice) => (voice.lang || "").toLowerCase().startsWith(base));
+}
+
+function populateVoices() {
+  if (!voiceSelect) return;
+  const chosen = store.get(VOICE_NAME_STORE) || "";
+  const language = languageSelect?.value || getLanguage();
+  const base = language.split("-")[0].toLowerCase();
+  const all = listBrowserVoices();
+  const sameLanguage = all.filter((voice) => (voice.lang || "").toLowerCase().startsWith(base));
+  const shown = sameLanguage.length ? sameLanguage : all;
+
+  voiceSelect.innerHTML = '<option value="">Automatic for selected language</option>';
+  for (const voice of shown) {
+    const option = document.createElement("option");
+    option.value = voice.name;
+    option.textContent = `${voice.name} (${voice.lang || "unknown"})`;
+    voiceSelect.appendChild(option);
+  }
+  voiceSelect.value = shown.some((voice) => voice.name === chosen) ? chosen : "";
+}
+
+function loadSettings() {
+  apiKeyInput.value = getKey();
+  modelInput.value = getModel();
+  personaInput.value = getPersona();
+  languageSelect.value = getLanguage();
+  populateVoices();
+}
+
+function syncAvatarSettings() {
+  const language = getLanguage();
+  const voiceName = store.get(VOICE_NAME_STORE) || "";
+  window.ariaAvatar?.setLanguage?.(language);
+  window.ariaAvatar?.setVoiceName?.(voiceName);
+  window.ariaAvatar?.setVoice?.(store.get(VOICE_STORE) !== "off");
+  populateVoices();
+}
 
 function openModal() { loadSettings(); modal.hidden = false; }
 function closeModal() { modal.hidden = true; }
 
 el("settingsBtn").addEventListener("click", openModal);
 el("closeModal").addEventListener("click", closeModal);
+modal.addEventListener("click", (event) => { if (event.target === modal) closeModal(); });
+
+languageSelect.addEventListener("change", () => {
+  populateVoices();
+  window.ariaAvatar?.setLanguage?.(languageSelect.value);
+});
+
+voiceSelect.addEventListener("change", () => {
+  window.ariaAvatar?.setLanguage?.(languageSelect.value);
+  window.ariaAvatar?.setVoiceName?.(voiceSelect.value);
+  window.ariaAvatar?.primeVoice?.();
+  const preview = LANGUAGES[languageSelect.value]?.preview || LANGUAGES["en-IN"].preview;
+  window.ariaAvatar?.speak?.(preview);
+});
 
 const saveBtn = el("saveSettings");
 saveBtn.addEventListener("click", () => {
-  // Never let an exception stop the modal from closing or feedback from showing.
+  const language = LANGUAGES[languageSelect.value] ? languageSelect.value : "en-IN";
   store.set(KEY_STORE, apiKeyInput.value.trim());
   store.set(MODEL_STORE, modelInput.value.trim() || DEFAULT_MODEL);
   store.set(PERSONA_STORE, personaInput.value.trim() || DEFAULT_PERSONA);
-  store.set(VOICE_NAME_STORE, voiceSelect ? voiceSelect.value : "");
-  window.ariaAvatar?.setVoiceName?.(voiceSelect ? voiceSelect.value : "");
+  store.set(LANGUAGE_STORE, language);
+  document.documentElement.lang = language;
+  store.set(VOICE_NAME_STORE, voiceSelect.value || "");
+  syncAvatarSettings();
 
   const original = saveBtn.textContent;
   saveBtn.textContent = "Saved ✓";
   setTimeout(() => {
     saveBtn.textContent = original;
     closeModal();
-    setStatus("Online");
-    if (!storageWorks) {
-      toast("Settings won't persist — your browser is blocking storage (common on file:// pages). Run from a local server to keep them.", "error");
+    setPhase("idle");
+    if (language === "kn-IN" && !hasVoiceForLanguage(language)) {
+      toast("No Kannada system voice was found. Install a Kannada voice in your device settings for spoken Kannada.", "error", 9000);
     }
-  }, 550);
+    if (!storageWorks) toast("Browser storage is blocked; these settings last only for this page session.", "error");
+  }, 350);
 });
-modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
 
-// instant preview when a voice is chosen (the change event is a user gesture)
-voiceSelect?.addEventListener("change", () => {
-  window.ariaAvatar?.setVoiceName?.(voiceSelect.value);
-  window.ariaAvatar?.primeVoice?.();
-  window.ariaAvatar?.speak?.("Hi, this is how I sound.");
-});
+try { window.speechSynthesis?.addEventListener?.("voiceschanged", populateVoices); } catch {}
+window.addEventListener("aria-avatar-ready", syncAvatarSettings);
 
 // ------------------------------------------------------------------ voice toggle
-const voiceBtn = el("voiceBtn");
 function applyVoice(on) {
-  window.ariaAvatar?.setVoice(on);
+  window.ariaAvatar?.setVoice?.(on);
   voiceBtn.textContent = on ? "🔊" : "🔇";
   voiceBtn.title = on ? "Voice on — click to mute" : "Voice off — click to unmute";
 }
 voiceBtn.addEventListener("click", () => {
-  const currentlyOn = store.get(VOICE_STORE) !== "off"; // default on
-  const next = !currentlyOn;
+  const next = store.get(VOICE_STORE) === "off";
   store.set(VOICE_STORE, next ? "on" : "off");
   applyVoice(next);
-  if (next) window.ariaAvatar?.primeVoice?.(); // unlock audio on this gesture
+  if (next) window.ariaAvatar?.primeVoice?.();
 });
 
-// ------------------------------------------------------------------ avatar fx
-// The 3D engine (avatar3d.js) owns blinking + idle motion. We only toggle
-// the talking state so the mouth syncs to replies.
-function startTalking() { window.ariaAvatar?.startTalking(); }
-function stopTalking() { window.ariaAvatar?.stopTalking(); }
-
-function setStatus(text, thinking = false) {
-  statusText.textContent = text;
-  statusPill.classList.toggle("thinking", thinking);
-  window.ariaAvatar?.setThinking?.(thinking);
+// ------------------------------------------------------------------ phase/UI
+function setPhase(next) {
+  phase = next;
+  document.body.dataset.phase = next;
+  const copy = langCopy();
+  const labels = {
+    idle: copy.online,
+    listening: copy.listening,
+    thinking: copy.thinking,
+    speaking: copy.speaking,
+    stopping: copy.online,
+  };
+  statusText.textContent = labels[next] || copy.online;
+  statusPill.classList.toggle("thinking", next === "thinking");
+  statusPill.classList.toggle("listening", next === "listening");
+  statusPill.classList.toggle("speaking", next === "speaking");
+  stopBtn.hidden = next !== "thinking" && next !== "speaking";
+  sendBtn.disabled = next === "thinking" || next === "speaking";
+  window.ariaAvatar?.setPhase?.(next);
 }
 
-// ------------------------------------------------------------------ messages
-// Chat bubbles are ONLY for real content: what the user sends and what the
-// model actually replies. App notifications use toast() instead, so nothing
-// is ever faked as if Aria said it.
+// ------------------------------------------------------------------ messages/toasts
 function addMessage(role, text) {
-  const hint = el("emptyHint");
-  if (hint) hint.remove();
+  el("emptyHint")?.remove();
   const div = document.createElement("div");
   div.className = "msg " + (role === "user" ? "me" : "bot");
   div.textContent = text;
@@ -165,18 +241,20 @@ function addMessage(role, text) {
   return div;
 }
 
-// transient, dismissable notification (not part of the conversation)
-const toastsBox = el("toasts");
-function toast(msg, type = "info", ms) {
+function toast(message, type = "info", duration) {
   if (!toastsBox) return;
-  const d = document.createElement("div");
-  d.className = "toast " + type;
-  d.textContent = msg;
-  toastsBox.appendChild(d);
-  const life = ms || (type === "error" ? 7000 : 3500);
+  const div = document.createElement("div");
+  div.className = `toast ${type}`;
+  div.textContent = message;
+  toastsBox.appendChild(div);
+  const life = duration || (type === "error" ? 7000 : 3500);
   const timer = setTimeout(dismiss, life);
-  function dismiss() { clearTimeout(timer); d.classList.add("out"); setTimeout(() => d.remove(), 250); }
-  d.addEventListener("click", dismiss);
+  function dismiss() {
+    clearTimeout(timer);
+    div.classList.add("out");
+    setTimeout(() => div.remove(), 250);
+  }
+  div.addEventListener("click", dismiss);
 }
 
 function showTyping(on) {
@@ -184,319 +262,376 @@ function showTyping(on) {
   if (on) messagesBox.scrollTop = messagesBox.scrollHeight;
 }
 
-// On a file:// page, location.origin is the string "null", which OpenRouter
-// rejects as a Referer. Fall back to a valid URL in that case.
 function referer() {
-  const o = location.origin;
-  return o && o !== "null" ? o : "https://aria-avatar-chat.local";
+  const origin = location.origin;
+  return origin && origin !== "null" ? origin : "https://aria-avatar-chat.local";
 }
 
-// ------------------------------------------------------------------ API call
-async function askOpenRouter(userText, imageDataUrl = null) {
-  const key = getKey();
-  if (!key) {
-    openModal();
-    toast("Add your OpenRouter API key in settings first.", "error");
-    return;
+// ------------------------------------------------------------------ camera vision
+let camStream = null;
+let cameraOn = false;
+let cameraStarting = false;
+let cameraGeneration = 0;
+let cameraStartedByCall = false;
+
+async function startCamera(owner = "user") {
+  if (cameraOn) return true;
+  if (cameraStarting) return false;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    toast("Camera access is unavailable in this browser context.", "error");
+    return false;
   }
 
-  // Store plain text in history (so we don't resend heavy image bytes every turn).
-  history.push({ role: "user", content: userText });
-
-  const messages = [{ role: "system", content: getPersona() }, ...history];
-  // Attach the camera frame to just the current message (OpenAI-style vision).
-  if (imageDataUrl) {
-    messages[messages.length - 1] = {
-      role: "user",
-      content: [
-        { type: "text", text: userText || "What do you see?" },
-        { type: "image_url", image_url: { url: imageDataUrl, detail: "high" } },
-      ],
-    };
-  }
-
-  const payload = { model: getModel(), messages };
-
-  setStatus("Thinking…", true);
-  showTyping(true);
-  currentController = new AbortController();
-
+  cameraStarting = true;
+  const generation = ++cameraGeneration;
   try {
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      signal: currentController.signal,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer " + key,
-        "HTTP-Referer": referer(),
-        "X-Title": "Aria Avatar Chat",
-      },
-      body: JSON.stringify(payload),
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false,
     });
-
-    showTyping(false);
-
-    if (!res.ok) {
-      const errText = await res.text();
-      setStatus("Online");
-      toast(`API error (${res.status}): ${errText.slice(0, 200)}`, "error", 10000);
-      return;
+    if (generation !== cameraGeneration) {
+      stream.getTracks().forEach((track) => track.stop());
+      return false;
     }
-
-    const data = await res.json();
-    const reply = data?.choices?.[0]?.message?.content?.trim() || "(no response)";
-    history.push({ role: "assistant", content: reply });
-
-    setStatus("Speaking…");
-    // Speak aloud + lip-sync (if the engine is ready) while the text reveals.
-    const spoken = window.ariaAvatar?.speak
-      ? window.ariaAvatar.speak(reply)
-      : (startTalking(), Promise.resolve());
-    await typeOut(reply);
-    await spoken;            // wait for speech + lip-sync to finish
-    stopTalking();
-    setStatus("Online");
-  } catch (err) {
-    showTyping(false);
-    stopTalking();
-    setStatus("Online");
-    if (err && err.name === "AbortError") return; // user said "stop" — not an error
-    toast("Network error: " + err.message, "error", 10000);
+    camStream = stream;
+    cameraEl.srcObject = stream;
+    await cameraEl.play().catch(() => {});
+    cameraOn = true;
+    cameraStartedByCall = owner === "call";
+    camPreview.hidden = false;
+    cameraBtn.classList.add("active");
+    cameraBtn.title = "Camera on — click to turn off";
+    toast("Camera on.");
+    return true;
+  } catch {
+    toast("Camera permission was denied or the camera is unavailable.", "error");
+    return false;
   } finally {
-    currentController = null;
+    cameraStarting = false;
   }
 }
 
-// Reveal the reply character-by-character so the mouth animation feels synced
-function typeOut(text) {
+function stopCamera() {
+  cameraGeneration++;
+  camStream?.getTracks().forEach((track) => track.stop());
+  camStream = null;
+  cameraEl.srcObject = null;
+  cameraOn = false;
+  cameraStartedByCall = false;
+  camPreview.hidden = true;
+  cameraBtn.classList.remove("active");
+  cameraBtn.title = "Let Aria see you (camera)";
+}
+
+function captureFrame(maxWidth = 1024, quality = 0.88) {
+  if (!cameraOn || !cameraEl.videoWidth) return null;
+  const scale = Math.min(1, maxWidth / cameraEl.videoWidth);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(cameraEl.videoWidth * scale);
+  canvas.height = Math.round(cameraEl.videoHeight * scale);
+  canvas.getContext("2d", { alpha: false }).drawImage(cameraEl, 0, 0, canvas.width, canvas.height);
+  try { return canvas.toDataURL("image/jpeg", quality); }
+  catch { return null; }
+}
+
+async function captureVisionFrames() {
+  if (!cameraOn) return [];
+  const first = captureFrame(768, 0.78);
+  await new Promise((resolve) => setTimeout(resolve, 180));
+  const latest = captureFrame(1024, 0.88);
+  return [first, latest].filter(Boolean);
+}
+
+cameraBtn.addEventListener("click", () => {
+  if (cameraOn || cameraStarting) stopCamera();
+  else startCamera("user");
+});
+window.addEventListener("pagehide", stopCamera);
+
+// ------------------------------------------------------------------ request/turn coordinator
+function buildVisionMessage(text, frames) {
+  if (!frames.length) return { role: "user", content: text };
+  const content = [
+    {
+      type: "text",
+      text: `${text}\n\nThe attached camera images are chronological frames from the same live moment. Use the newest clear frame for colour/counting and compare both only when interpreting a visible gesture or motion.`,
+    },
+  ];
+  frames.forEach((url, index) => content.push({
+    type: "image_url",
+    image_url: { url, detail: index === frames.length - 1 ? "high" : "low" },
+  }));
+  return { role: "user", content };
+}
+
+async function askOpenRouter(text, frames, turn) {
+  const userHistoryMessage = { role: "user", content: text };
+  const languageRule = LANGUAGES[turn.language]?.replyRule || LANGUAGES["en-IN"].replyRule;
+  const requestMessages = [
+    { role: "system", content: `${getPersona()}\n${languageRule}` },
+    ...history,
+    buildVisionMessage(text, frames),
+  ];
+
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    signal: turn.controller.signal,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getKey()}`,
+      "HTTP-Referer": referer(),
+      "X-Title": "Aria Avatar Chat",
+    },
+    body: JSON.stringify({ model: getModel(), messages: requestMessages }),
+  });
+
+  if (!response.ok) {
+    const textBody = await response.text();
+    throw new Error(`API ${response.status}: ${textBody.slice(0, 220)}`);
+  }
+
+  const data = await response.json();
+  const reply = data?.choices?.[0]?.message?.content?.trim();
+  if (!reply) throw new Error("The model returned an empty response.");
+  if (turn.cancelled || turn.id !== activeTurn?.id) throw new DOMException("Cancelled", "AbortError");
+
+  history.push(userHistoryMessage, { role: "assistant", content: reply });
+  if (history.length > 20) history = history.slice(-20);
+  return reply;
+}
+
+function typeOut(text, turn) {
   return new Promise((resolve) => {
     const div = addMessage("assistant", "");
-    let i = 0;
-    const step = Math.max(1, Math.round(text.length / 140)); // keep it snappy
+    let index = 0;
+    const step = Math.max(1, Math.round(text.length / 150));
     const timer = setInterval(() => {
-      i += step;
-      div.textContent = text.slice(0, i);
-      messagesBox.scrollTop = messagesBox.scrollHeight;
-      if (i >= text.length) {
-        div.textContent = text;
+      if (turn.cancelled || turn.controller.signal.aborted) {
         clearInterval(timer);
+        div.textContent = text;
+        resolve();
+        return;
+      }
+      index += step;
+      div.textContent = text.slice(0, index);
+      messagesBox.scrollTop = messagesBox.scrollHeight;
+      if (index >= text.length) {
+        clearInterval(timer);
+        div.textContent = text;
         resolve();
       }
     }, 18);
   });
 }
 
-// ------------------------------------------------------------------ camera (vision)
-const cameraBtn = el("cameraBtn");
-const cameraEl = el("camera");
-const camPreview = el("camPreview");
-let camStream = null;
-let cameraOn = false;
-
-let camStarting = false;
-async function startCamera() {
-  if (cameraOn || camStarting) return; // guard against double-clicks
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    toast("This browser can't access the camera here.", "error");
+async function runTurn(text) {
+  const value = (text || "").trim();
+  if (!value || activeTurn) return;
+  if (!getKey()) {
+    openModal();
+    toast("Add your OpenRouter API key first.", "error");
     return;
   }
-  camStarting = true;
+
+  stopRecognition(true);
+  const session = callSession;
+  const turn = {
+    id: ++turnSequence,
+    session,
+    language: getLanguage(),
+    controller: new AbortController(),
+    cancelled: false,
+  };
+  activeTurn = turn;
+  setPhase("thinking");
+  showTyping(true);
+
   try {
-    camStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
-      audio: false,
-    });
-    cameraEl.srcObject = camStream;
-    await cameraEl.play().catch(() => {});
-    camPreview.hidden = false;
-    cameraOn = true;
-    cameraBtn.classList.add("active");
-    cameraBtn.title = "Camera on — click to turn off";
-    toast("Camera on — Aria can see you now.", "info");
-  } catch (e) {
-    toast("Couldn't open the camera. Allow camera permission, then tap 📷 again.", "error");
+    const frames = await captureVisionFrames();
+    if (turn.cancelled || turn !== activeTurn) throw new DOMException("Cancelled", "AbortError");
+    addMessage("user", frames.length ? `${value}  📷` : value);
+    input.value = "";
+
+    const reply = await askOpenRouter(value, frames, turn);
+    if (turn.cancelled || turn !== activeTurn) throw new DOMException("Cancelled", "AbortError");
+    showTyping(false);
+    setPhase("speaking");
+    window.ariaAvatar?.setLanguage?.(turn.language);
+    const speech = window.ariaAvatar?.speak?.(reply) || Promise.resolve();
+    await Promise.all([speech, typeOut(reply, turn)]);
+  } catch (error) {
+    if (error?.name !== "AbortError") toast(error.message || "The request failed.", "error", 10000);
   } finally {
-    camStarting = false;
+    showTyping(false);
+    if (activeTurn?.id === turn.id) activeTurn = null;
+    setPhase("idle");
+    if (liveMode && session === callSession) scheduleListening(700, session);
   }
 }
 
-function stopCamera() {
-  if (camStream) { camStream.getTracks().forEach((t) => t.stop()); camStream = null; }
-  cameraEl.srcObject = null;
-  camPreview.hidden = true;
-  cameraOn = false;
-  cameraBtn.classList.remove("active");
-  cameraBtn.title = "Let Aria see you (camera)";
+function cancelActiveTurn({ resume = true } = {}) {
+  const turn = activeTurn;
+  if (!turn) return;
+  setPhase("stopping");
+  turn.cancelled = true;
+  turn.controller.abort();
+  window.ariaAvatar?.stopTalking?.();
+  if (!resume || !liveMode) setPhase("idle");
 }
 
-// grab the current webcam frame as a compressed JPEG data URL
-function captureFrame() {
-  const v = cameraEl;
-  if (!v || !v.videoWidth) return null;
-  const maxW = 1024; // higher detail -> better finger/colour/object accuracy
-  const scale = Math.min(1, maxW / v.videoWidth);
-  const w = Math.round(v.videoWidth * scale);
-  const h = Math.round(v.videoHeight * scale);
-  const c = document.createElement("canvas");
-  c.width = w; c.height = h;
-  c.getContext("2d").drawImage(v, 0, 0, w, h);
-  try { return c.toDataURL("image/jpeg", 0.88); } catch { return null; }
-}
-
-cameraBtn.addEventListener("click", () => { cameraOn ? stopCamera() : startCamera(); });
-
-// ------------------------------------------------------------------ submit
-async function sendText(text) {
-  const t = (text || "").trim();
-  if (!t) return;
-  const img = cameraOn ? captureFrame() : null; // snapshot of what Aria sees
-  addMessage("user", img ? t + "  📷" : t);
-  input.value = "";
-  processing = true;
-  speakGuardUntil = Date.now() + 1200; // no "stop" during think + first moment of speech
-  try {
-    await askOpenRouter(t, img); // resolves after Aria finishes speaking
-  } finally {
-    processing = false;
-    turnCooldownUntil = Date.now() + 800; // ignore her echo tail before next turn
-    // hands-free: once she's done replying, keep listening for the next turn
-    if (liveMode) setTimeout(() => { if (liveMode && !listening && !processing) startListening(); }, 300);
-  }
-}
-composer.addEventListener("submit", (e) => {
-  e.preventDefault();
-  // Unlock speech synthesis while we still have the click's user activation.
+stopBtn.addEventListener("click", () => cancelActiveTurn({ resume: true }));
+composer.addEventListener("submit", (event) => {
+  event.preventDefault();
   window.ariaAvatar?.primeVoice?.();
-  sendText(input.value);
+  runTurn(input.value);
 });
 
-// ------------------------------------------------------------------ voice command (speech-to-text)
-const micBtn = el("micBtn");
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let recog = null;
-let listening = false;
+// ------------------------------------------------------------------ speech recognition
+const SpeechRecognitionApi = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-function stopListening() {
-  listening = false;
+function clearListenTimer() {
+  if (listenTimer) { clearTimeout(listenTimer); listenTimer = null; }
+}
+
+function stopRecognition(abort = false) {
+  clearListenTimer();
+  input.placeholder = "Say something to Aria…";
+  const current = recognition;
+  recognition = null;
+  recognitionToken++;
   micBtn.classList.remove("listening");
-  window.ariaAvatar?.setListening?.(false);
-  try { recog && recog.stop(); } catch {}
+  window.ariaAvatar?.setPhase?.(phase === "listening" ? "idle" : phase);
+  if (!current) return;
+  try { abort ? current.abort() : current.stop(); } catch {}
 }
 
-function startListening() {
-  if (!recog || listening) return;
-  if (!liveMode) { try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {} }
-  recog.continuous = liveMode;  // live keeps listening (so you can barge-in with "stop")
-  input.value = "";
-  input.placeholder = "Listening… speak now";
-  listening = true;
-  micBtn.classList.add("listening");
-  window.ariaAvatar?.setListening?.(true);
-  setStatus("Listening…");
-  try { recog.start(); } catch {}
+function scheduleListening(delay, session = callSession) {
+  clearListenTimer();
+  listenTimer = setTimeout(() => {
+    listenTimer = null;
+    if (liveMode && session === callSession && !activeTurn) startListening({ live: true, session });
+  }, delay);
 }
 
-// spoken commands — matched EXACTLY (whole phrase), so Aria's own sentences
-// echoing into the mic can't accidentally trigger them.
-const STOP_WORDS = new Set(["stop", "stop it", "wait", "hold on", "enough", "cancel", "pause", "quiet"]);
-const EXIT_WORDS = new Set(["exit", "bye", "goodbye", "good bye", "end call", "hang up", "hangup", "quit", "stop conversation"]);
-function normalizeCmd(t) { return t.toLowerCase().replace(/[^a-z\s]/g, "").trim().replace(/\s+/g, " "); }
+function startListening({ live = false, session = callSession } = {}) {
+  if (!SpeechRecognitionApi || recognition || activeTurn) return;
+  const rec = new SpeechRecognitionApi();
+  const token = ++recognitionToken;
+  recognition = rec;
+  rec.lang = getLanguage();
+  rec.interimResults = true;
+  rec.continuous = false;
+  rec.maxAlternatives = 1;
 
-function interruptSpeech() {
-  try { currentController && currentController.abort(); } catch {}
-  window.ariaAvatar?.stopTalking?.(); // cancels speech + resolves the turn
-  setStatus("Listening…");
-}
-
-if (SR) {
-  recog = new SR();
-  recog.lang = "en-US";
-  recog.interimResults = true;
-  recog.continuous = false;
-  recog.maxAlternatives = 1;
-
-  recog.onresult = (e) => {
-    const last = e.results[e.results.length - 1];
-    const raw = ((last && last[0] && last[0].transcript) || "").trim();
-    if (!raw) return;
-    const cmd = normalizeCmd(raw);
-
-    if (liveMode) {
-      // say exactly "exit"/"bye" to end the call anytime
-      if (EXIT_WORDS.has(cmd) && (last.isFinal || processing)) { stopLive(); return; }
-      // while Aria is replying/speaking: only an exact "stop" barges in; ignore the rest (echo)
-      if (processing) {
-        if (STOP_WORDS.has(cmd) && Date.now() > speakGuardUntil) interruptSpeech();
-        return;
-      }
-      // ignore the echo tail of her voice for a moment after she finishes
-      if (Date.now() < turnCooldownUntil) return;
-      // normal turn
-      input.value = raw;
-      if (last.isFinal) { input.value = ""; sendText(raw); }
-      return;
-    }
-
-    // push-to-talk (single utterance)
-    input.value = raw;
-    if (last.isFinal) { stopListening(); sendText(raw); }
+  rec.onstart = () => {
+    if (recognition !== rec) return;
+    micBtn.classList.add("listening");
+    setPhase("listening");
   };
-  recog.onerror = (e) => {
-    stopListening();
-    if (e && (e.error === "not-allowed" || e.error === "service-not-allowed")) {
-      toast("Couldn't access the microphone. Allow mic permission, then tap 🎤 again.", "error");
+  rec.onresult = (event) => {
+    if (recognition !== rec) return;
+    let transcript = "";
+    let final = false;
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      transcript += event.results[i][0]?.transcript || "";
+      final ||= event.results[i].isFinal;
     }
-  };
-  recog.onend = () => {
-    input.placeholder = "Say something to Aria…";
-    listening = false;
+    input.value = transcript.trim();
+    if (!final || !input.value) return;
+    const spoken = input.value;
+    recognition = null;
+    try { rec.stop(); } catch {}
     micBtn.classList.remove("listening");
-    window.ariaAvatar?.setListening?.(false);
-    if (!liveMode && !processing) setStatus("Online");
-    // live mode: if a turn isn't in progress, keep the ear open for the next one
-    if (liveMode && !processing) {
-      setTimeout(() => { if (liveMode && !processing && !listening) startListening(); }, 500);
+    runTurn(spoken);
+  };
+  rec.onerror = (event) => {
+    if (recognition !== rec) return;
+    recognition = null;
+    micBtn.classList.remove("listening");
+    const fatal = event.error === "not-allowed" || event.error === "service-not-allowed";
+    if (fatal) {
+      toast("Microphone permission is required for live conversation.", "error");
+      if (liveMode) stopLive();
+    }
+  };
+  rec.onend = () => {
+    input.placeholder = "Say something to Aria…";
+    if (recognition === rec) recognition = null;
+    micBtn.classList.remove("listening");
+    if (live && liveMode && session === callSession && !activeTurn && token === recognitionToken) {
+      scheduleListening(450, session);
+    } else if (!activeTurn && !liveMode) {
+      setPhase("idle");
     }
   };
 
-  micBtn.addEventListener("click", () => {
-    window.ariaAvatar?.primeVoice?.();
-    listening ? stopListening() : startListening();
-  });
-} else {
-  // No speech recognition support (e.g. Firefox) — hide the mic button.
-  micBtn.style.display = "none";
+  input.value = "";
+  input.placeholder = LANGUAGES[getLanguage()]?.listening || "Listening…";
+  try { rec.start(); }
+  catch {
+    recognition = null;
+    micBtn.classList.remove("listening");
+    if (live && liveMode) scheduleListening(600, session);
+  }
 }
 
-// ------------------------------------------------------------------ live conversation (hands-free)
-const callBtn = el("callBtn");
+micBtn.addEventListener("click", () => {
+  window.ariaAvatar?.primeVoice?.();
+  if (recognition) {
+    stopRecognition(true);
+    setPhase("idle");
+  } else if (!activeTurn) {
+    startListening({ live: false });
+  }
+});
+
+// ------------------------------------------------------------------ half-duplex live conversation
 async function startLive() {
-  if (!SR) { toast("Live voice chat needs speech recognition — try Chrome or Edge.", "error"); return; }
-  if (!getKey()) { openModal(); toast("Add your OpenRouter API key to start a live chat.", "error"); return; }
+  if (!SpeechRecognitionApi) {
+    toast("Live voice conversation requires Chrome, Edge, or another browser with speech recognition.", "error");
+    return;
+  }
+  if (!getKey()) {
+    openModal();
+    toast("Add your OpenRouter API key first.", "error");
+    return;
+  }
+
   liveMode = true;
+  const session = ++callSession;
   callBtn.classList.add("active", "calling");
+  callBtn.textContent = "📵";
   callBtn.title = "End live conversation";
   window.ariaAvatar?.primeVoice?.();
-  if (!cameraOn) { try { await startCamera(); } catch {} } // scan + see the user
-  toast("Live conversation on — just talk, I'm listening. Tap 📞 to end.", "info");
-  if (!processing && !listening) startListening();
+
+  if (!cameraOn) await startCamera("call");
+  if (!liveMode || session !== callSession) return;
+  toast("Live conversation started. The mic pauses while the avatar speaks, preventing echo.");
+  startListening({ live: true, session });
 }
+
 function stopLive() {
   liveMode = false;
-  callBtn.classList.remove("active", "calling");
-  callBtn.title = "Start live voice conversation";
-  stopListening();
+  callSession++;
+  clearListenTimer();
+  stopRecognition(true);
+  cancelActiveTurn({ resume: false });
   window.ariaAvatar?.stopTalking?.();
-  setStatus("Online");
+  callBtn.classList.remove("active", "calling");
+  callBtn.textContent = "📞";
+  callBtn.title = "Start live voice conversation";
+  if (cameraStartedByCall) stopCamera();
+  setPhase("idle");
 }
-callBtn?.addEventListener("click", () => { liveMode ? stopLive() : startLive(); });
+
+callBtn.addEventListener("click", () => { liveMode ? stopLive() : startLive(); });
 
 // ------------------------------------------------------------------ init
 function init() {
-  try { loadSettings(); } catch (e) { /* storage blocked — handled by safe store */ }
-  applyVoice(store.get(VOICE_STORE) !== "off"); // default: voice on
-  window.ariaAvatar?.setVoiceName?.(store.get(VOICE_NAME_STORE) || "");
-  // No fake greeting — the empty-state hint in #messages guides the user,
-  // and the chat only ever shows real user/model exchanges.
+  loadSettings();
+  document.documentElement.lang = getLanguage();
+  applyVoice(store.get(VOICE_STORE) !== "off");
+  syncAvatarSettings();
+  setPhase("idle");
 }
 init();

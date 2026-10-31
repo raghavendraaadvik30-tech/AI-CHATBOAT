@@ -96,6 +96,8 @@ const clock = new THREE.Clock();
 
 let voiceOn = true;
 try { if (localStorage.getItem("aria.voice") === "off") voiceOn = false; } catch {}
+let preferredLanguage = "en-IN";
+try { preferredLanguage = localStorage.getItem("aria.language") || "en-IN"; } catch {}
 let talking = false;
 let currentViseme = null;
 let mouthGain = 0;
@@ -103,6 +105,7 @@ let emotion = {};
 let speakTimeout = null;
 let primed = false, keepAlive = null;
 let pendingFinish = null;
+let speechGeneration = 0;
 // lip-sync timing: track real speech pace from word-boundary events
 let seqG = null, speechActive = false;
 let charsPerMs = 0.05, anchorTime = 0, anchorChar = 0, lastBoundaryChar = -1, lastBoundaryTime = 0;
@@ -112,6 +115,9 @@ let sacX = 0, sacY = 0;
 let nextBlink = 1.2, blinkT = -1, blink = 0;
 let browT = -1, nextBrow = 3;
 let nod = 0;
+let gestureNod = 0, gestureTilt = 0, gestureBrow = 0;
+let boundaryCount = 0;
+let emotionGain = 0;
 let thinking = false, listening = false;
 let microSmile = 0, nextSmile = 6;
 
@@ -171,14 +177,40 @@ function charToViseme(c) {
 function buildVisemeSeq(text) {
   const t = text.toLowerCase();
   const seq = [];
+  const kannadaMap = {
+    "ಅ":"aa", "ಆ":"aa", "ಾ":"aa",
+    "ಇ":"I", "ಈ":"I", "ಿ":"I", "ೀ":"I", "ಐ":"I", "ೈ":"I",
+    "ಎ":"E", "ಏ":"E", "ೆ":"E", "ೇ":"E",
+    "ಉ":"U", "ಊ":"U", "ು":"U", "ೂ":"U",
+    "ಒ":"O", "ಓ":"O", "ಔ":"O", "ೊ":"O", "ೋ":"O", "ೌ":"O",
+    "ಪ":"PP", "ಫ":"PP", "ಬ":"PP", "ಭ":"PP", "ಮ":"PP",
+    "ಕ":"kk", "ಖ":"kk", "ಗ":"kk", "ಘ":"kk", "ಙ":"kk",
+    "ಚ":"CH", "ಛ":"CH", "ಜ":"CH", "ಝ":"CH", "ಞ":"CH",
+    "ತ":"DD", "ಥ":"DD", "ದ":"DD", "ಧ":"DD", "ನ":"nn",
+    "ಟ":"DD", "ಠ":"DD", "ಡ":"DD", "ಢ":"DD", "ಣ":"nn",
+    "ಲ":"DD", "ಳ":"DD", "ರ":"RR", "ಯ":"I", "ವ":"U",
+    "ಸ":"SS", "ಶ":"CH", "ಷ":"CH", "ಹ":"aa", "ಂ":"nn",
+  };
+
   for (let i = 0; i < t.length; i++) {
+    const char = t[i];
+    const kannada = kannadaMap[char];
+    if (kannada) {
+      seq.push({ v: kannada, start: i });
+      // Kannada consonants carry a short inherent /a/ unless followed by a
+      // vowel sign or virama. This transition makes native words read better.
+      if (/[ಕ-ಹ]/.test(char) && !/[ಾ-ೌ್]/.test(t[i + 1] || "")) seq.push({ v: "aa", start: i + 0.55 });
+      continue;
+    }
+    if (char === "್") { seq.push({ v: "sil", start: i }); continue; }
+
     const two = t.substr(i, 2);
     if (two === "th") { seq.push({ v: "TH", start: i }); i++; continue; }
     if (two === "ch" || two === "sh") { seq.push({ v: "CH", start: i }); i++; continue; }
     if (two === "ng") { seq.push({ v: "nn", start: i }); i++; continue; }
-    const v = charToViseme(t[i]);
+    const v = charToViseme(char);
     if (v) seq.push({ v, start: i });
-    else if (/[.,!?;:]/.test(t[i])) seq.push({ v: "sil", start: i });
+    else if (/[.,!?;:।]/.test(char)) seq.push({ v: "sil", start: i });
   }
   if (!seq.length) seq.push({ v: "sil", start: 0 });
   return seq;
@@ -189,11 +221,13 @@ function cleanForSpeech(text) {
 }
 function estDuration(text) {
   const words = cleanForSpeech(text).split(/\s+/).filter(Boolean).length;
-  return Math.max(1200, words * 340 + 400);
+  const perWord = preferredLanguage.startsWith("kn") ? 390 : 330;
+  return Math.max(1100, words * perWord + 350);
 }
 
 // -------------------------------------------------------------- expression
 function setEmotionFromText(text) {
+  emotionGain = 1;
   const ex = (text.match(/!/g) || []).length;
   const q = (text.match(/\?/g) || []).length;
   const smiley = /(:\)|:D|😊|😄|😀|🙂|😁|❤|😍|🎉|😎)/.test(text);
@@ -215,6 +249,10 @@ function setEmotionFromText(text) {
 // continuously corrected by real onboundary events -> lips track the voice.
 function startSpeechSync(seq, dur) {
   seqG = seq;
+  boundaryCount = 0;
+  gestureNod = 0;
+  gestureTilt = 0;
+  gestureBrow = 0;
   const totalChars = seq.length ? seq[seq.length - 1].start + 1 : 1;
   charsPerMs = Math.max(0.005, totalChars / Math.max(1, dur));
   anchorTime = performance.now(); anchorChar = 0;
@@ -223,12 +261,25 @@ function startSpeechSync(seq, dur) {
 }
 function onBoundary(charIndex) {
   const now = performance.now();
-  if (lastBoundaryTime && charIndex > lastBoundaryChar) {
-    const r = (charIndex - lastBoundaryChar) / (now - lastBoundaryTime); // chars/ms
-    if (isFinite(r) && r > 0) charsPerMs = charsPerMs * 0.5 + r * 0.5;    // smooth
+  boundaryCount++;
+  // Small phrase beats make speech feel intentional without puppet-like
+  // constant nodding. Eyes move first, then the head follows.
+  if (boundaryCount % 3 === 0) gestureNod = Math.min(1, gestureNod + 0.75);
+  if (boundaryCount % 5 === 0) gestureTilt = (boundaryCount % 10 === 0 ? -1 : 1) * 0.55;
+  if (boundaryCount % 4 === 0) gestureBrow = 0.55;
+  if (boundaryCount % 3 === 0) {
+    sacX = (Math.random() * 2 - 1) * 0.16;
+    sacY = (Math.random() * 2 - 1) * 0.1;
   }
-  lastBoundaryChar = charIndex; lastBoundaryTime = now;
-  anchorChar = charIndex; anchorTime = now; // re-anchor to the real position
+  if (lastBoundaryTime && charIndex > lastBoundaryChar) {
+    const elapsed = now - lastBoundaryTime;
+    const rate = (charIndex - lastBoundaryChar) / elapsed;
+    if (isFinite(rate) && rate > 0 && rate < 0.2) charsPerMs = THREE.MathUtils.lerp(charsPerMs, rate, 0.35);
+  }
+  lastBoundaryChar = charIndex;
+  lastBoundaryTime = now;
+  anchorChar = charIndex;
+  anchorTime = now;
 }
 function stopSpeechSync() { speechActive = false; seqG = null; currentViseme = null; }
 
@@ -243,17 +294,24 @@ const FEMALE_RE = /female|zira|aria|jenny|samantha|karen|moira|tessa|victoria|su
 
 function pickVoice() {
   if (!voices.length) refreshVoices();
-  // 1) exact user choice
+  const wanted = preferredLanguage.toLowerCase();
+  const base = wanted.split("-")[0];
+  const compatible = (voice) => (voice.lang || "").toLowerCase().startsWith(base);
+
+  // Respect an explicit choice only if it matches the selected language.
   if (preferredVoiceName) {
-    const exact = voices.find((v) => v.name === preferredVoiceName);
+    const exact = voices.find((voice) => voice.name === preferredVoiceName && compatible(voice));
     if (exact) return exact;
   }
-  // 2) automatic -> prefer a MALE English voice
-  const male = ["Google UK English Male", "Microsoft David", "Microsoft Mark", "Microsoft Guy",
-    "Daniel", "Alex", "Fred", "Rishi", "Aaron", "Arthur", "Oliver", "Thomas"];
-  for (const name of male) { const v = voices.find((x) => x.name && x.name.includes(name)); if (v) return v; }
-  return voices.find((v) => /^en/i.test(v.lang) && /male|david|mark|daniel|alex|fred|guy|oliver|thomas/i.test(v.name) && !FEMALE_RE.test(v.name))
-    || voices.find((v) => /^en/i.test(v.lang)) || voices[0] || null;
+
+  const languageVoices = voices.filter(compatible);
+  const maleNames = /male|david|mark|daniel|alex|fred|guy|oliver|thomas|rishi|aaron|arthur/i;
+  return languageVoices.find((voice) => maleNames.test(voice.name) && !FEMALE_RE.test(voice.name))
+    || languageVoices.find((voice) => (voice.lang || "").toLowerCase() === wanted)
+    || languageVoices[0]
+    || voices.find((voice) => /^en/i.test(voice.lang || ""))
+    || voices[0]
+    || null;
 }
 function voicePitchFor(v) { return v && FEMALE_RE.test(v.name) ? 1.12 : 0.95; }
 
@@ -279,6 +337,7 @@ function primeVoice() {
 function stopKeepAlive() { if (keepAlive) { clearInterval(keepAlive); keepAlive = null; } }
 
 function cancelSpeak() {
+  speechGeneration++;
   stopSpeechSync();
   stopKeepAlive();
   if (speakTimeout) { clearTimeout(speakTimeout); speakTimeout = null; }
@@ -289,9 +348,11 @@ function cancelSpeak() {
 
 function speak(text) {
   cancelSpeak();
-  const seq = buildVisemeSeq(text);
-  setEmotionFromText(text);
-  const dur = estDuration(text);
+  const generation = speechGeneration;
+  const spokenText = cleanForSpeech(text) || " ";
+  const seq = buildVisemeSeq(spokenText);
+  setEmotionFromText(spokenText);
+  const dur = estDuration(spokenText);
   const ss = window.speechSynthesis;
 
   return new Promise((resolve) => {
@@ -311,26 +372,30 @@ function speak(text) {
     const begin = () => {
       if (started) return; started = true;
       if (startFb) { clearTimeout(startFb); startFb = null; }
+      talking = true;
       startSpeechSync(seq, dur);
     };
 
     const canSpeak = voiceOn && ss && window.SpeechSynthesisUtterance;
-    talking = true; // mouth gain ramps; it stays near-closed until begin()
+    talking = !canSpeak;
 
     if (canSpeak) {
-      const u = new SpeechSynthesisUtterance(cleanForSpeech(text) || " ");
+      const u = new SpeechSynthesisUtterance(spokenText);
       const v = pickVoice(); if (v) u.voice = v;
+      u.lang = preferredLanguage;
       u.rate = 1.0; u.pitch = voicePitchFor(v); u.volume = 1.0;
-      u.onstart = () => { talking = true; begin(); };
-      u.onboundary = (e) => { if (typeof e.charIndex === "number") onBoundary(e.charIndex); };
-      u.onend = finish;
-      u.onerror = finish;
+      u.onstart = () => { if (generation === speechGeneration) begin(); };
+      u.onboundary = (e) => {
+        if (generation === speechGeneration && typeof e.charIndex === "number") onBoundary(e.charIndex);
+      };
+      u.onend = () => { if (generation === speechGeneration) finish(); };
+      u.onerror = () => { if (generation === speechGeneration) finish(); };
       try {
         ss.resume();
         ss.speak(u);
         keepAlive = setInterval(() => { try { ss.pause(); ss.resume(); } catch {} }, 9000);
       } catch { begin(); }
-      startFb = setTimeout(begin, 400); // if onstart is late/missing, move lips anyway
+      startFb = setTimeout(begin, 650); // fallback only for browsers that omit onstart
       speakTimeout = setTimeout(finish, dur + 8000);
     } else {
       begin();
@@ -450,9 +515,14 @@ function animate() {
   if (influences) {
     for (const n of MANAGED) setTExact(n, 0);
 
-    // emotion / resting expression
-    for (const [k, v] of Object.entries(emotion)) setT(k, v);
+    // emotion / resting expression with a natural post-speech decay
+    if (!talking) emotionGain = Math.max(0, emotionGain - dt * 0.22);
+    for (const [k, v] of Object.entries(emotion)) setT(k, v * emotionGain);
     setT("browInnerUp", 0.05 + 0.03 * Math.sin(t * 0.7));
+
+    gestureBrow = Math.max(0, gestureBrow - dt * 2.8);
+    setT("browOuterUp_L", gestureBrow * 0.22);
+    setT("browOuterUp_R", gestureBrow * 0.2);
 
     // attentive listening pose — engaged, brows up, looking at you
     if (listening && !talking) {
@@ -502,8 +572,8 @@ function animate() {
     }
     gazeTX = Math.max(-1, Math.min(1, px * 0.7 + sacX));
     gazeTY = Math.max(-1, Math.min(1, py * 0.5 + sacY));
-    if (thinking) { gazeTX = -0.45 + 0.1 * Math.sin(t * 1.3); gazeTY = -0.5; } // glance up & away
-    else if (listening) { gazeTX = px * 0.4; gazeTY = py * 0.3; }              // stay on the user
+    if (thinking && !talking) { gazeTX = -0.32 + 0.06 * Math.sin(t * 1.3); gazeTY = -0.35; }
+    else if (listening && !talking) { gazeTX = px * 0.32; gazeTY = py * 0.24; }
     gazeX += (gazeTX - gazeX) * Math.min(1, dt * 10);
     gazeY += (gazeTY - gazeY) * Math.min(1, dt * 10);
     applyGaze();
@@ -543,17 +613,21 @@ function animate() {
   px += (tpx - px) * Math.min(1, dt * 3.5);
   py += (tpy - py) * Math.min(1, dt * 3.5);
 
-  // head: breathing + layered idle sway + turn toward the pointer + nods
+  // Head gestures are event-driven by speech boundaries. This avoids the
+  // mechanical constant nod that made the previous animation look robotic.
   if (faceRoot) {
     const speakingNow = talking || currentViseme;
     nod += ((speakingNow ? 1 : 0) - nod) * Math.min(1, dt * 4);
-    const idleY = 0.045 * Math.sin(t * 0.5) + 0.02 * Math.sin(t * 0.17 + 1);
-    const idleX = 0.028 * Math.sin(t * 0.63 + 1) + 0.012 * Math.sin(t * 0.23);
-    faceRoot.rotation.y = baseRot.y + idleY + px * 0.22;
-    faceRoot.rotation.x = baseRot.x + idleX + py * 0.13 + nod * 0.03 * Math.sin(t * 6.5);
-    const tiltZ = (listening && !talking ? 0.09 : 0) + (thinking && !talking ? 0.06 : 0);
-    faceRoot.rotation.z = baseRot.z + 0.014 * Math.sin(t * 0.4) - px * 0.03 + tiltZ;
-    faceRoot.position.y = basePos.y + 0.004 * Math.sin(t * 1.1); // breathing
+    gestureNod = Math.max(0, gestureNod - dt * 2.6);
+    gestureTilt *= Math.exp(-dt * 2.1);
+    const nodBeat = Math.sin(gestureNod * Math.PI) * 0.055;
+    const idleY = 0.026 * Math.sin(t * 0.43) + 0.012 * Math.sin(t * 0.19 + 1);
+    const idleX = 0.018 * Math.sin(t * 0.51 + 1) + 0.008 * Math.sin(t * 0.21);
+    faceRoot.rotation.y = baseRot.y + idleY + px * 0.13 + gestureTilt * 0.045;
+    faceRoot.rotation.x = baseRot.x + idleX + py * 0.075 + nodBeat;
+    const attentiveTilt = (listening && !talking ? 0.065 : 0) + (thinking && !talking ? 0.035 : 0);
+    faceRoot.rotation.z = baseRot.z + 0.008 * Math.sin(t * 0.36) - px * 0.018 + attentiveTilt + gestureTilt * 0.018;
+    faceRoot.position.y = basePos.y + 0.003 * Math.sin(t * 1.05);
   }
 
   // subtle camera parallax for depth (only once framed)
@@ -574,7 +648,12 @@ window.ariaAvatar = {
   primeVoice,
   startTalking() { cancelSpeak(); talking = true; },
   stopTalking() { cancelSpeak(); },
-  setVoice(on) { voiceOn = !!on; if (!on) { try { window.speechSynthesis.cancel(); } catch {} } },
+  setVoice(on) { voiceOn = !!on; if (!on) cancelSpeak(); },
+  setLanguage(language) { preferredLanguage = language || "en-IN"; },
+  setPhase(next) {
+    thinking = next === "thinking";
+    listening = next === "listening";
+  },
   setThinking(on) { thinking = !!on; },
   setListening(on) { listening = !!on; },
   listVoices() { refreshVoices(); return voices.map((v) => ({ name: v.name, lang: v.lang, default: !!v.default })); },
@@ -582,3 +661,4 @@ window.ariaAvatar = {
   get voiceOn() { return voiceOn; },
   get ttsSupported() { return !!(window.speechSynthesis && window.SpeechSynthesisUtterance); },
 };
+window.dispatchEvent(new CustomEvent("aria-avatar-ready"));

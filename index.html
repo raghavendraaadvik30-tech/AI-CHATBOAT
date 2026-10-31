@@ -56,6 +56,7 @@
         <div class="chat-head-title">Chat with Aria</div>
         <div class="chat-head-actions">
           <button id="callBtn" class="icon-btn" title="Start live voice conversation" aria-label="Start live conversation">📞</button>
+          <button id="stopBtn" class="icon-btn stop-btn" title="Stop response" aria-label="Stop response" hidden>■</button>
           <button id="cameraBtn" class="icon-btn" title="Let Aria see you (camera)" aria-label="Toggle camera">📷</button>
           <button id="voiceBtn" class="icon-btn" title="Toggle voice" aria-label="Toggle voice">🔊</button>
           <button id="settingsBtn" class="icon-btn" title="Settings" aria-label="Settings">⚙</button>
@@ -102,11 +103,19 @@
         <input id="model" type="text" placeholder="openai/gpt-4o-mini" />
       </label>
       <label class="field">
+        <span>Conversation language</span>
+        <select id="languageSelect">
+          <option value="en-IN">English (India)</option>
+          <option value="kn-IN">ಕನ್ನಡ (Kannada)</option>
+        </select>
+        <small>Controls microphone recognition, AI reply language, voice, and lip shapes.</small>
+      </label>
+      <label class="field">
         <span>Voice</span>
         <select id="voiceSelect">
-          <option value="">Automatic (male)</option>
+          <option value="">Automatic for selected language</option>
         </select>
-        <small>Pick an installed voice. Male options usually include “David”, “Daniel”, “Mark”, “Alex”.</small>
+        <small>Kannada speech requires a Kannada voice installed in your browser or operating system.</small>
       </label>
       <label class="field">
         <span>Personality (system prompt)</span>
@@ -122,8 +131,8 @@
   <!-- transient notifications (not chat messages) -->
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
-  <!-- 3D avatar engine (module) then chat logic (classic) -->
+  <!-- 3D avatar engine, followed by app coordinator -->
   <script type="module" src="avatar3d.js"></script>
-  <script src="app.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>

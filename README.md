@@ -14,18 +14,21 @@ moves her **jaw and mouth** while she answers, powered by the
   the full **ARKit 52-blendshape** set, lit with image-based lighting for
   lifelike skin. (No Ready Player Me dependency — that service shut down in
   Jan 2026; assets load from the reliable jsDelivr CDN.)
-- **Real lip-sync + voice** — Aria **speaks replies aloud** (Web Speech API)
-  and her lips follow the words: text is converted to viseme mouth shapes and
-  timed to the actual speech, resyncing on word boundaries. Toggle voice with
-  the 🔊 button.
-- **Voice commands** — tap the 🎤 mic button and **talk to Aria**; your speech
-  is transcribed (Web Speech Recognition) and sent automatically. (Supported in
-  Chrome/Edge/Safari; the button hides itself where unsupported.)
+- **Speech-driven lip-sync + voice** — Aria speaks replies with the browser
+  Web Speech API. English and Kannada text are mapped to ARKit viseme shapes;
+  the animation starts at real audio onset and re-anchors on speech boundary
+  events. Toggle output with 🔊.
+- **English + Kannada conversation** — Settings controls recognition, reply,
+  voice, and mouth-shape language (`en-IN` or `kn-IN`). Spoken Kannada requires
+  a Kannada system voice installed on the device.
+- **No-echo live conversation** — 📞 starts a coordinated half-duplex call:
+  listen → think → speak → acoustic pause → listen. The microphone is closed
+  while Aria speaks, which prevents speaker output from feeding back as a new
+  question. Use the red ■ control to interrupt a response safely.
 - **Vision (camera)** — tap 📷 to share your webcam. A live preview appears over
-  the avatar, and each message you send includes the current frame, so Aria can
-  **answer about what she sees** — count fingers, name your shirt colour,
-  identify objects, etc. Requires a vision-capable model (the default
-  `openai/gpt-4o-mini` works).
+  the avatar. Each turn can include two chronological frames, allowing Aria to
+  inspect static details (fingers, shirt colour, objects) and simple visible
+  gestures. Requires a vision-capable model.
 - **Expressive face** — eyebrow raises, eye **saccades** (natural darting
   gaze), blinking, cheek/nose/squint movement, head nods while talking, and an
   **emotion** read from the reply (happy / curious / excited) that shapes the
@@ -34,15 +37,15 @@ moves her **jaw and mouth** while she answers, powered by the
   indicator, live status pill (Online / Thinking / Speaking).
 - **OpenRouter integration** — bring your own key and model.
 - **Customisable personality** — edit Aria's system prompt in settings.
-- **Zero dependencies** — just open `index.html`.
+- **Served as static modules** — no package install or build step.
 
 ## 🚀 Getting started
 
-1. Open `index.html` in any modern browser.
-2. Click the **⚙ settings** icon.
-3. Paste your **OpenRouter API key** (`sk-or-v1-…`), pick a model
-   (default `openai/gpt-4o-mini`), optionally tweak the personality.
-4. Start chatting with Aria.
+1. Serve the project: `python3 -m http.server 8000`.
+2. Open `http://localhost:8000` in Chrome or Edge.
+3. Click **⚙ settings**, add your OpenRouter API key, choose English or Kannada,
+   and select an installed voice.
+4. Tap 📞 for a no-echo hands-free conversation, or use 🎤 for one voice turn.
 
 Your key is stored **only** in your browser's `localStorage` and is sent
 only to OpenRouter.
@@ -74,8 +77,8 @@ proxy that keeps the key server-side — never ship a real key in client code.
 
 ## 🛠️ Customise
 
-- **Avatar model:** swap `MODEL_URL` in `avatar3d.js` for any GLB with ARKit
-  blendshapes (`jawOpen`, `eyeBlinkLeft/Right`, `mouthSmile…`).
+- **Avatar model:** swap `MODEL_URL` in `avatar3d.js` for a compatible GLB with
+  ARKit morph targets (`jawOpen`, `eyeBlink_L/R`, `mouthSmile_L/R`, etc.).
 - **Expression / motion:** tune the blink cadence, talking jaw range, and
   idle head-sway in the `animate()` loop of `avatar3d.js`.
 - **Behaviour:** tweak `DEFAULT_MODEL` and `DEFAULT_PERSONA` in `app.js`.
