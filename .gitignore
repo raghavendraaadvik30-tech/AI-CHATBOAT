@@ -7,3 +7,6 @@ Thumbs.db
 
 # dependencies (none needed, but just in case)
 node_modules/
+
+# Kiro tooling artifacts
+.kiro/
