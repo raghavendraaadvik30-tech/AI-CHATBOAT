@@ -15,8 +15,10 @@ moves her **jaw and mouth** while she answers, powered by the
   lifelike skin. (No Ready Player Me dependency — that service shut down in
   Jan 2026; assets load from the reliable jsDelivr CDN.)
 - **OpenRouter multilingual speech** — one OpenRouter key handles chat, camera
-  vision, and neural speech for English, Kannada, Hindi, Tamil, Telugu, and
-  Malayalam. Browser speech is the only fallback and has a finite timeout.
+  vision, and optional neural speech for English, Kannada, Hindi, Tamil, Telugu,
+  and Malayalam. Automatic mode tries the free browser voice first and uses the
+  Fish Audio `fish-audio/drama-3` model only when the selected language has no
+  local voice.
 - **Waveform-assisted lip-sync** — OpenRouter speech is decoded through Web
   Audio. Exact audio duration controls viseme pacing, while live waveform
   energy closes the mouth during pauses. Kannada and English have detailed
@@ -66,7 +68,8 @@ moves her **jaw and mouth** while she answers, powered by the
 
 Your keys are stored in the browser's `localStorage` only when entered in
 Settings. Server environment keys stay server-side. OpenRouter and Stability
-credentials are sent only to their matching provider.
+credentials are sent only to their matching provider. Retired provider
+credentials and old speech-model settings are purged on load.
 
 ## 📁 Project structure
 

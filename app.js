@@ -13,7 +13,7 @@ const TTS_MODEL_STORE = "aria.ttsModel";
 const STABILITY_KEY_STORE = "aria.stabilityApiKey";
 const IMAGE_ENGINE_STORE = "aria.imageEngine";
 const IMAGE_ASPECT_STORE = "aria.imageAspect";
-const DEFAULT_TTS_MODEL = "google/gemini-3.1-flash-tts-preview";
+const DEFAULT_TTS_MODEL = "fish-audio/drama-3";
 
 const DEFAULT_MODEL = "openai/gpt-4o-mini";
 const DEFAULT_PERSONA =
@@ -131,6 +131,9 @@ const store = {
 function removeRetiredProviderData() {
   ["aria.googleApiKey", "aria.googleTtsModel", "aria.sonexApiKey", "aria.sonexVoiceId"]
     .forEach((key) => store.remove(key));
+  if ((store.get(TTS_MODEL_STORE) || "").startsWith("google/")) {
+    store.set(TTS_MODEL_STORE, DEFAULT_TTS_MODEL);
+  }
 }
 
 function getKey() { return store.get(KEY_STORE) || ""; }
@@ -140,9 +143,13 @@ function getImageAspect() { return store.get(IMAGE_ASPECT_STORE) || "1:1"; }
 function getModel() { return store.get(MODEL_STORE) || DEFAULT_MODEL; }
 function getPersona() { return store.get(PERSONA_STORE) || DEFAULT_PERSONA; }
 function getTtsMode() {
-  return store.get(TTS_MODE_STORE) === "browser" ? "browser" : "openrouter";
+  const mode = store.get(TTS_MODE_STORE) || "auto";
+  return mode === "browser" || mode === "openrouter" ? mode : "auto";
 }
-function getTtsModel() { return store.get(TTS_MODEL_STORE) || DEFAULT_TTS_MODEL; }
+function getTtsModel() {
+  const stored = store.get(TTS_MODEL_STORE) || "";
+  return stored.startsWith("google/") ? DEFAULT_TTS_MODEL : (stored || DEFAULT_TTS_MODEL);
+}
 function getLanguage() {
   const value = store.get(LANGUAGE_STORE) || "en-IN";
   return LANGUAGES[value] ? value : "en-IN";
@@ -236,7 +243,7 @@ saveBtn.addEventListener("click", () => {
   store.set(MODEL_STORE, modelInput.value.trim() || DEFAULT_MODEL);
   store.set(PERSONA_STORE, personaInput.value.trim() || DEFAULT_PERSONA);
   store.set(LANGUAGE_STORE, language);
-  store.set(TTS_MODE_STORE, ttsModeSelect.value === "browser" ? "browser" : "openrouter");
+  store.set(TTS_MODE_STORE, ["auto", "browser", "openrouter"].includes(ttsModeSelect.value) ? ttsModeSelect.value : "auto");
   store.set(TTS_MODEL_STORE, ttsModelInput.value.trim() || DEFAULT_TTS_MODEL);
   store.set(IMAGE_ENGINE_STORE, imageEngineSelect.value || "core");
   store.set(IMAGE_ASPECT_STORE, imageAspectSelect.value || "1:1");
@@ -792,7 +799,6 @@ async function fetchOpenRouterSpeech(text, turn, signal = turn.controller.signal
     body: JSON.stringify({
       model: getTtsModel(),
       input: text,
-      voice: "Orus",
       response_format: "mp3",
       speed: 1,
     }),
@@ -831,7 +837,8 @@ async function fetchNeuralSpeech(text, turn) {
 }
 
 function shouldUseNeuralSpeech(language) {
-  return getTtsMode() === "openrouter" || !hasVoiceForLanguage(language);
+  const mode = getTtsMode();
+  return mode === "openrouter" || (mode === "auto" && !hasVoiceForLanguage(language));
 }
 
 function typeOut(text, turn) {
@@ -1102,7 +1109,7 @@ function init() {
   document.documentElement.lang = getLanguage();
   applyVoice(store.get(VOICE_STORE) !== "off");
   syncAvatarSettings();
-  setSpeechProvider("OpenRouter voice");
+  setSpeechProvider("Automatic voice");
   setPhase("idle");
 }
 init();
