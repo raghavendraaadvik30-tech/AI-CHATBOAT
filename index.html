@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=8" />
+  <link rel="stylesheet" href="style.css?v=9" />
 
   <!-- Three.js via import map (jsDelivr: reliable CORS + binary assets) -->
   <script type="importmap">
@@ -106,6 +106,16 @@
         <small>Used for chat, camera vision, and fallback speech.</small>
       </label>
       <label class="field">
+        <span>SonexLabs API key</span>
+        <input id="sonexApiKey" type="password" placeholder="vsk_…" autocomplete="off" />
+        <small>Primary Kannada speech provider when the server proxy is not configured.</small>
+      </label>
+      <label class="field">
+        <span>SonexLabs voice ID (optional)</span>
+        <input id="sonexVoiceId" type="text" placeholder="Automatic voice" autocomplete="off" />
+        <small>Leave empty for automatic selection, or copy an ID from your SonexLabs voice library.</small>
+      </label>
+      <label class="field">
         <span>Google Gemini API key</span>
         <input id="googleApiKey" type="password" placeholder="AQ.Ab…" autocomplete="off" />
         <small>Used directly for primary Kannada neural speech. Stored only in this browser.</small>
@@ -130,7 +140,8 @@
       <label class="field">
         <span>Speech quality</span>
         <select id="ttsModeSelect">
-          <option value="auto">Automatic (Google → OpenRouter → browser)</option>
+          <option value="auto">Automatic (Sonex → Google → OpenRouter)</option>
+          <option value="sonex">SonexLabs Panini voice</option>
           <option value="google">Google Gemini neural voice</option>
           <option value="openrouter">OpenRouter neural voice</option>
           <option value="browser">Browser system voice</option>
@@ -184,7 +195,7 @@
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
   <!-- 3D avatar engine, followed by app coordinator -->
-  <script type="module" src="avatar3d.js?v=8"></script>
-  <script type="module" src="app.js?v=8"></script>
+  <script type="module" src="avatar3d.js?v=9"></script>
+  <script type="module" src="app.js?v=9"></script>
 </body>
 </html>

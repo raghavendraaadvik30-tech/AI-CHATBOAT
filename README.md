@@ -14,10 +14,10 @@ moves her **jaw and mouth** while she answers, powered by the
   the full **ARKit 52-blendshape** set, lit with image-based lighting for
   lifelike skin. (No Ready Player Me dependency — that service shut down in
   Jan 2026; assets load from the reliable jsDelivr CDN.)
-- **Dual-provider neural speech** — the OpenRouter key handles chat, vision, and
-  fallback speech. An optional Google Gemini key provides primary Kannada TTS
-  through the native Gemini API. Automatic mode tries Google, then OpenRouter,
-  then the browser system voice.
+- **Multi-provider neural speech** — SonexLabs Panini is the first speech
+  provider for low-latency multilingual output, followed by Google Gemini,
+  OpenRouter, and the browser voice. Kannada text is auto-detected by Sonex;
+  an optional voice ID can select a specific SonexLabs voice.
 - **Waveform-assisted lip-sync** — neural speech is decoded through Web Audio.
   Exact audio duration controls viseme pacing, while live waveform energy closes
   the mouth during pauses and scales jaw movement during voiced syllables.
@@ -54,21 +54,22 @@ moves her **jaw and mouth** while she answers, powered by the
 1. Use Node 18 or newer. Export a rotated Stability key and start the included
    same-origin proxy:
    ```bash
-   export STABILITY_API_KEY="your-rotated-key"
+   export STABILITY_API_KEY="your-rotated-stability-key"
+   export SONEX_API_KEY="your-rotated-sonex-key"
+   # Optional: export SONEX_VOICE_ID="voice-id-from-sonex-dashboard"
    npm start
    ```
 2. Open `http://localhost:8000` in Chrome or Edge.
-3. Click **⚙ settings** and add the provider keys you use: OpenRouter for
-   chat/vision, Google for primary Kannada speech, and Stability AI for image
-   generation. Leave speech mode on Automatic.
+3. Click **⚙ settings** and add any keys not supplied to the server. OpenRouter
+   handles chat/vision, SonexLabs is primary Kannada speech, Google and
+   OpenRouter provide speech fallbacks, and Stability AI generates images.
 4. Tap 📞 for a no-echo conversation or 🎤 for one voice turn. Ask “generate
    an image of…” by text or voice to route that request automatically to
    Stability AI; the picture button remains available as a manual shortcut.
 
-Your keys are stored in the browser's `localStorage`. The OpenRouter key is
-sent only to OpenRouter, the Google key only to Google's native Gemini API,
-and the Stability key only to `api.stability.ai`. For public deployment, move
-all provider credentials behind a server-side proxy.
+Your keys are stored in the browser's `localStorage` only when entered in
+Settings. Server environment keys stay server-side. OpenRouter, Google,
+SonexLabs, and Stability credentials are sent only to their matching provider.
 
 ## 📁 Project structure
 
@@ -91,10 +92,10 @@ all provider credentials behind a server-side proxy.
 
 ## ⚠️ Security note
 
-The Node proxy keeps `STABILITY_API_KEY` server-side. Other provider keys are
-still stored in browser `localStorage` for this local/personal demo. Before a
-public deployment, proxy OpenRouter and Google too, then add authentication and
-rate limiting.
+The Node proxy keeps `STABILITY_API_KEY`, `SONEX_API_KEY`, and optional
+`SONEX_VOICE_ID` server-side. OpenRouter and Google credentials are still
+stored in browser `localStorage` for this local/personal demo. Before a public
+release, proxy those providers too, then add authentication and rate limiting.
 
 ## 🛠️ Customise
 

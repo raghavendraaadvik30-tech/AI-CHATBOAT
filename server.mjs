@@ -8,6 +8,7 @@ const HOST = process.env.HOST || "127.0.0.1";
 const PORT = Number(process.env.PORT || 8000);
 const MAX_JSON_BYTES = 32 * 1024;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 const ENGINES = new Set(["core", "ultra"]);
 const ASPECTS = new Set(["1:1", "16:9", "9:16", "4:3", "3:4"]);
 const MIME = {
@@ -146,6 +147,67 @@ async function handleImage(req, res) {
   }
 }
 
+async function handleSonexSpeech(req, res) {
+  if (req.method !== "POST") return json(res, 405, { error: "Method not allowed" });
+  if (!sameOrigin(req)) return json(res, 403, { error: "Cross-origin requests are not allowed" });
+  if (!String(req.headers["content-type"] || "").startsWith("application/json")) {
+    return json(res, 415, { error: "Expected application/json" });
+  }
+
+  const key = process.env.SONEX_API_KEY;
+  if (!key) return json(res, 503, { error: "Sonex proxy is not configured", code: "sonex_proxy_unconfigured" });
+  const body = await readJson(req);
+  const text = typeof body.text === "string" ? body.text.trim() : "";
+  const voiceId = String(process.env.SONEX_VOICE_ID || body.voiceId || "").trim();
+  if (!text) return json(res, 400, { error: "Text is required" });
+  if (text.length > 10_000) return json(res, 400, { error: "Text must be 10000 characters or fewer" });
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error("upstream timeout")), 45_000);
+  const abortOnClose = () => { if (!res.writableEnded) controller.abort(new Error("client disconnected")); };
+  res.on("close", abortOnClose);
+
+  try {
+    const payload = { text, output_format: "wav", speed: 1 };
+    if (voiceId) payload.voice_id = voiceId;
+    const upstream = await fetch("https://api.sonexlabs.com/v1/speech/stream", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+        Accept: "audio/wav",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!upstream.ok) {
+      const errorBody = await readLimited(upstream, 256 * 1024);
+      return json(res, upstream.status, {
+        error: "SonexLabs rejected the speech request",
+        detail: errorBody.toString("utf8").slice(0, 500),
+      });
+    }
+    const contentType = String(upstream.headers.get("content-type") || "audio/wav").split(";")[0];
+    if (!contentType.startsWith("audio/")) return json(res, 502, { error: "SonexLabs returned a non-audio response" });
+    const audio = await readLimited(upstream, MAX_AUDIO_BYTES);
+    res.writeHead(200, secureHeaders({
+      "Content-Type": contentType,
+      "Content-Length": audio.length,
+      "Cache-Control": "no-store",
+    }));
+    res.end(audio);
+  } catch (error) {
+    if (controller.signal.aborted) {
+      if (!res.headersSent && !res.destroyed) json(res, 504, { error: "Speech generation timed out or was cancelled" });
+      return;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    res.off("close", abortOnClose);
+  }
+}
+
 async function serveStatic(req, res) {
   if (req.method !== "GET" && req.method !== "HEAD") return json(res, 405, { error: "Method not allowed" });
   let pathname;
@@ -176,9 +238,13 @@ async function serveStatic(req, res) {
 const server = http.createServer(async (req, res) => {
   try {
     if (req.url?.split("?")[0] === "/api/capabilities") {
-      return json(res, 200, { imageProxy: Boolean(process.env.STABILITY_API_KEY) });
+      return json(res, 200, {
+        imageProxy: Boolean(process.env.STABILITY_API_KEY),
+        sonexProxy: Boolean(process.env.SONEX_API_KEY),
+      });
     }
     if (req.url?.split("?")[0] === "/api/stability/generate") return await handleImage(req, res);
+    if (req.url?.split("?")[0] === "/api/sonex/speech") return await handleSonexSpeech(req, res);
     return await serveStatic(req, res);
   } catch (error) {
     if (!res.headersSent) json(res, error.status || 500, { error: error.status ? error.message : "Internal server error" });
@@ -189,4 +255,5 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`Aria running at http://${HOST}:${PORT}`);
   console.log(process.env.STABILITY_API_KEY ? "Stability proxy enabled" : "Stability proxy disabled (set STABILITY_API_KEY or use browser fallback)");
+  console.log(process.env.SONEX_API_KEY ? "Sonex speech proxy enabled" : "Sonex speech proxy disabled (set SONEX_API_KEY or use browser fallback)");
 });

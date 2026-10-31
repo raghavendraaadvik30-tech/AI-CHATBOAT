@@ -12,6 +12,8 @@ const TTS_MODE_STORE = "aria.ttsMode";
 const TTS_MODEL_STORE = "aria.ttsModel";
 const GOOGLE_KEY_STORE = "aria.googleApiKey";
 const GOOGLE_TTS_MODEL_STORE = "aria.googleTtsModel";
+const SONEX_KEY_STORE = "aria.sonexApiKey";
+const SONEX_VOICE_STORE = "aria.sonexVoiceId";
 const STABILITY_KEY_STORE = "aria.stabilityApiKey";
 const IMAGE_ENGINE_STORE = "aria.imageEngine";
 const IMAGE_ASPECT_STORE = "aria.imageAspect";
@@ -62,6 +64,8 @@ const statusText = el("statusText");
 const modal = el("modal");
 const apiKeyInput = el("apiKey");
 const googleApiKeyInput = el("googleApiKey");
+const sonexApiKeyInput = el("sonexApiKey");
+const sonexVoiceInput = el("sonexVoiceId");
 const stabilityApiKeyInput = el("stabilityApiKey");
 const modelInput = el("model");
 const personaInput = el("persona");
@@ -106,6 +110,8 @@ const store = {
 
 function getKey() { return store.get(KEY_STORE) || ""; }
 function getGoogleKey() { return store.get(GOOGLE_KEY_STORE) || ""; }
+function getSonexKey() { return store.get(SONEX_KEY_STORE) || ""; }
+function getSonexVoiceId() { return store.get(SONEX_VOICE_STORE) || ""; }
 function getStabilityKey() { return store.get(STABILITY_KEY_STORE) || ""; }
 function getImageEngine() { return store.get(IMAGE_ENGINE_STORE) || "core"; }
 function getImageAspect() { return store.get(IMAGE_ASPECT_STORE) || "1:1"; }
@@ -163,6 +169,8 @@ function populateVoices() {
 function loadSettings() {
   apiKeyInput.value = getKey();
   googleApiKeyInput.value = getGoogleKey();
+  sonexApiKeyInput.value = getSonexKey();
+  sonexVoiceInput.value = getSonexVoiceId();
   stabilityApiKeyInput.value = getStabilityKey();
   modelInput.value = getModel();
   personaInput.value = getPersona();
@@ -209,6 +217,8 @@ saveBtn.addEventListener("click", () => {
   const language = LANGUAGES[languageSelect.value] ? languageSelect.value : "en-IN";
   store.set(KEY_STORE, apiKeyInput.value.trim());
   store.set(GOOGLE_KEY_STORE, googleApiKeyInput.value.trim());
+  store.set(SONEX_KEY_STORE, sonexApiKeyInput.value.trim());
+  store.set(SONEX_VOICE_STORE, sonexVoiceInput.value.trim());
   store.set(STABILITY_KEY_STORE, stabilityApiKeyInput.value.trim());
   store.set(MODEL_STORE, modelInput.value.trim() || DEFAULT_MODEL);
   store.set(PERSONA_STORE, personaInput.value.trim() || DEFAULT_PERSONA);
@@ -780,6 +790,58 @@ function pcm16ToWav(pcm, sampleRate = 24000, channels = 1) {
   return wav.buffer;
 }
 
+async function fetchSonexSpeech(text, turn) {
+  const voiceId = getSonexVoiceId();
+
+  // Preferred same-origin proxy: avoids CORS and keeps the key server-side.
+  if (location.protocol !== "file:") {
+    const proxy = await fetch("/api/sonex/speech", {
+      method: "POST",
+      signal: turn.controller.signal,
+      headers: { "Content-Type": "application/json", Accept: "audio/wav, application/json" },
+      body: JSON.stringify({ text, voiceId }),
+    });
+    if (proxy.ok) return proxy.arrayBuffer();
+    let body = {};
+    try { body = await proxy.json(); } catch {}
+    const unavailable = proxy.status === 404 || proxy.status === 405 || proxy.status === 501
+      || (proxy.status === 503 && body.code === "sonex_proxy_unconfigured");
+    if (!unavailable) throw new Error(`Sonex proxy ${proxy.status}: ${body.detail || body.error || "request failed"}`);
+  }
+
+  const key = getSonexKey();
+  if (!key) throw new Error("SonexLabs key is not configured");
+  const payload = { text, output_format: "wav", speed: 1 };
+  if (voiceId) payload.voice_id = voiceId;
+  try {
+    const response = await fetch("https://api.sonexlabs.com/v1/speech/stream", {
+      method: "POST",
+      signal: turn.controller.signal,
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+        Accept: "audio/wav",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(`SonexLabs speech ${response.status}: ${detail.slice(0, 180)}`);
+    }
+    const contentType = String(response.headers.get("content-type") || "");
+    if (!contentType.startsWith("audio/")) {
+      const detail = await response.text();
+      throw new Error(`SonexLabs returned non-audio data: ${detail.slice(0, 160)}`);
+    }
+    return response.arrayBuffer();
+  } catch (error) {
+    if (error?.name === "TypeError") {
+      throw new Error("Direct SonexLabs speech was blocked by the browser. Run npm start with SONEX_API_KEY to use the speech proxy.");
+    }
+    throw error;
+  }
+}
+
 async function fetchGoogleSpeech(text, turn) {
   const key = getGoogleKey();
   if (!key) throw new Error("Google Gemini key is not configured");
@@ -842,14 +904,21 @@ async function fetchOpenRouterSpeech(text, turn) {
 
 async function fetchNeuralSpeech(text, turn) {
   const mode = getTtsMode();
-  const providers = mode === "openrouter"
-    ? [fetchOpenRouterSpeech, fetchGoogleSpeech]
-    : [fetchGoogleSpeech, fetchOpenRouterSpeech];
+  const orders = {
+    sonex: [fetchSonexSpeech, fetchOpenRouterSpeech, fetchGoogleSpeech],
+    google: [fetchGoogleSpeech, fetchSonexSpeech, fetchOpenRouterSpeech],
+    openrouter: [fetchOpenRouterSpeech, fetchSonexSpeech, fetchGoogleSpeech],
+    auto: [fetchSonexSpeech, fetchGoogleSpeech, fetchOpenRouterSpeech],
+    browser: [fetchSonexSpeech, fetchOpenRouterSpeech, fetchGoogleSpeech],
+  };
+  const providers = orders[mode] || orders.auto;
   const errors = [];
   for (const provider of providers) {
     try {
       const audio = await provider(text, turn);
-      return { audio, provider: provider === fetchGoogleSpeech ? "Google" : "OpenRouter" };
+      const providerName = provider === fetchSonexSpeech ? "SonexLabs"
+        : provider === fetchGoogleSpeech ? "Google" : "OpenRouter";
+      return { audio, provider: providerName };
     } catch (error) {
       if (error?.name === "AbortError") throw error;
       errors.push(error.message || String(error));
@@ -861,7 +930,7 @@ async function fetchNeuralSpeech(text, turn) {
 function shouldUseNeuralSpeech(language) {
   const mode = getTtsMode();
   if (mode === "browser") return language === "kn-IN" && !hasVoiceForLanguage(language);
-  return mode === "google" || mode === "openrouter" || mode === "auto";
+  return mode === "sonex" || mode === "google" || mode === "openrouter" || mode === "auto";
 }
 
 function typeOut(text, turn) {
