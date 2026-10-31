@@ -12,6 +12,9 @@ const TTS_MODE_STORE = "aria.ttsMode";
 const TTS_MODEL_STORE = "aria.ttsModel";
 const GOOGLE_KEY_STORE = "aria.googleApiKey";
 const GOOGLE_TTS_MODEL_STORE = "aria.googleTtsModel";
+const STABILITY_KEY_STORE = "aria.stabilityApiKey";
+const IMAGE_ENGINE_STORE = "aria.imageEngine";
+const IMAGE_ASPECT_STORE = "aria.imageAspect";
 const DEFAULT_TTS_MODEL = "google/gemini-3.1-flash-tts-preview";
 const DEFAULT_GOOGLE_TTS_MODEL = "gemini-3.1-flash-tts-preview";
 
@@ -59,6 +62,7 @@ const statusText = el("statusText");
 const modal = el("modal");
 const apiKeyInput = el("apiKey");
 const googleApiKeyInput = el("googleApiKey");
+const stabilityApiKeyInput = el("stabilityApiKey");
 const modelInput = el("model");
 const personaInput = el("persona");
 const voiceSelect = el("voiceSelect");
@@ -66,6 +70,9 @@ const languageSelect = el("languageSelect");
 const ttsModeSelect = el("ttsModeSelect");
 const ttsModelInput = el("ttsModel");
 const googleTtsModelInput = el("googleTtsModel");
+const imageEngineSelect = el("imageEngineSelect");
+const imageAspectSelect = el("imageAspectSelect");
+const imageBtn = el("imageBtn");
 const toastsBox = el("toasts");
 const cameraEl = el("camera");
 const camPreview = el("camPreview");
@@ -76,6 +83,7 @@ let liveMode = false;
 let callSession = 0;
 let turnSequence = 0;
 let activeTurn = null;
+let activeImageGeneration = null;
 let recognition = null;
 let recognitionToken = 0;
 let listenTimer = null;
@@ -98,6 +106,9 @@ const store = {
 
 function getKey() { return store.get(KEY_STORE) || ""; }
 function getGoogleKey() { return store.get(GOOGLE_KEY_STORE) || ""; }
+function getStabilityKey() { return store.get(STABILITY_KEY_STORE) || ""; }
+function getImageEngine() { return store.get(IMAGE_ENGINE_STORE) || "core"; }
+function getImageAspect() { return store.get(IMAGE_ASPECT_STORE) || "1:1"; }
 function getModel() { return store.get(MODEL_STORE) || DEFAULT_MODEL; }
 function getPersona() { return store.get(PERSONA_STORE) || DEFAULT_PERSONA; }
 function getTtsMode() {
@@ -152,12 +163,15 @@ function populateVoices() {
 function loadSettings() {
   apiKeyInput.value = getKey();
   googleApiKeyInput.value = getGoogleKey();
+  stabilityApiKeyInput.value = getStabilityKey();
   modelInput.value = getModel();
   personaInput.value = getPersona();
   languageSelect.value = getLanguage();
   ttsModeSelect.value = getTtsMode() === "cloud" ? "openrouter" : getTtsMode();
   ttsModelInput.value = getTtsModel();
   googleTtsModelInput.value = getGoogleTtsModel();
+  imageEngineSelect.value = getImageEngine();
+  imageAspectSelect.value = getImageAspect();
   populateVoices();
 }
 
@@ -195,12 +209,15 @@ saveBtn.addEventListener("click", () => {
   const language = LANGUAGES[languageSelect.value] ? languageSelect.value : "en-IN";
   store.set(KEY_STORE, apiKeyInput.value.trim());
   store.set(GOOGLE_KEY_STORE, googleApiKeyInput.value.trim());
+  store.set(STABILITY_KEY_STORE, stabilityApiKeyInput.value.trim());
   store.set(MODEL_STORE, modelInput.value.trim() || DEFAULT_MODEL);
   store.set(PERSONA_STORE, personaInput.value.trim() || DEFAULT_PERSONA);
   store.set(LANGUAGE_STORE, language);
   store.set(TTS_MODE_STORE, ttsModeSelect.value || "auto");
   store.set(TTS_MODEL_STORE, ttsModelInput.value.trim() || DEFAULT_TTS_MODEL);
   store.set(GOOGLE_TTS_MODEL_STORE, googleTtsModelInput.value.trim() || DEFAULT_GOOGLE_TTS_MODEL);
+  store.set(IMAGE_ENGINE_STORE, imageEngineSelect.value || "core");
+  store.set(IMAGE_ASPECT_STORE, imageAspectSelect.value || "1:1");
   document.documentElement.lang = language;
   store.set(VOICE_NAME_STORE, voiceSelect.value || "");
   syncAvatarSettings();
@@ -375,6 +392,129 @@ cameraBtn.addEventListener("click", () => {
   else startCamera("user");
 });
 window.addEventListener("pagehide", stopCamera);
+
+// ------------------------------------------------------------------ Stability AI image generation
+const generatedImageUrls = new Set();
+
+function createImageCard(prompt) {
+  el("emptyHint")?.remove();
+  const card = document.createElement("article");
+  card.className = "image-card generating";
+
+  const preview = document.createElement("div");
+  preview.className = "image-card-preview";
+  const spinner = document.createElement("span");
+  spinner.className = "image-spinner";
+  const state = document.createElement("span");
+  state.className = "image-card-state";
+  state.textContent = "Generating image…";
+  preview.append(spinner, state);
+
+  const caption = document.createElement("p");
+  caption.className = "image-card-caption";
+  caption.textContent = prompt;
+
+  const actions = document.createElement("div");
+  actions.className = "image-card-actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "image-card-button";
+  cancel.textContent = "Cancel";
+  actions.appendChild(cancel);
+
+  card.append(preview, caption, actions);
+  messagesBox.appendChild(card);
+  messagesBox.scrollTop = messagesBox.scrollHeight;
+  return { card, preview, state, actions, cancel };
+}
+
+async function generateImage(prompt) {
+  const text = (prompt || "").trim();
+  if (!text) { toast("Enter an image prompt first.", "error"); return; }
+  if (!getStabilityKey()) {
+    openModal();
+    toast("Add your Stability AI API key first.", "error");
+    return;
+  }
+  if (activeImageGeneration || activeTurn) {
+    toast("Wait for the current generation or response to finish.", "error");
+    return;
+  }
+
+  stopRecognition(true);
+  const controller = new AbortController();
+  activeImageGeneration = { controller };
+  imageBtn.disabled = true;
+  imageBtn.classList.add("generating");
+  addMessage("user", `${text}  🎨`);
+  input.value = "";
+  const ui = createImageCard(text);
+  ui.cancel.addEventListener("click", () => controller.abort(), { once: true });
+
+  const engine = getImageEngine() === "ultra" ? "ultra" : "core";
+  const form = new FormData();
+  form.append("prompt", text);
+  form.append("aspect_ratio", getImageAspect());
+  form.append("output_format", "webp");
+
+  try {
+    const response = await fetch(`https://api.stability.ai/v2beta/stable-image/generate/${engine}`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${getStabilityKey()}`,
+        Accept: "image/*",
+      },
+      body: form,
+    });
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(`Stability AI ${response.status}: ${detail.slice(0, 240)}`);
+    }
+
+    const blob = await response.blob();
+    if (!blob.type.startsWith("image/")) throw new Error("Stability AI returned an unsupported response.");
+    const url = URL.createObjectURL(blob);
+    generatedImageUrls.add(url);
+
+    const image = document.createElement("img");
+    image.src = url;
+    image.alt = text;
+    image.loading = "lazy";
+    await image.decode().catch(() => {});
+    ui.preview.replaceChildren(image);
+    ui.card.classList.remove("generating");
+    ui.card.classList.add("ready");
+    ui.actions.replaceChildren();
+
+    const download = document.createElement("a");
+    download.className = "image-card-button primary";
+    download.href = url;
+    download.download = `aria-${Date.now()}.webp`;
+    download.textContent = "Download";
+    ui.actions.appendChild(download);
+  } catch (error) {
+    ui.card.classList.remove("generating");
+    ui.card.classList.add("failed");
+    ui.preview.replaceChildren();
+    ui.state.textContent = error?.name === "AbortError" ? "Generation cancelled" : "Image generation failed";
+    ui.preview.appendChild(ui.state);
+    ui.actions.replaceChildren();
+    if (error?.name !== "AbortError") toast(error.message || "Image generation failed.", "error", 10000);
+  } finally {
+    activeImageGeneration = null;
+    imageBtn.disabled = false;
+    imageBtn.classList.remove("generating");
+    if (liveMode) scheduleListening(500, callSession);
+  }
+}
+
+imageBtn.addEventListener("click", () => generateImage(input.value));
+window.addEventListener("pagehide", () => {
+  activeImageGeneration?.controller.abort();
+  generatedImageUrls.forEach((url) => URL.revokeObjectURL(url));
+  generatedImageUrls.clear();
+});
 
 // ------------------------------------------------------------------ request/turn coordinator
 function buildVisionMessage(text, frames) {
@@ -568,6 +708,7 @@ function typeOut(text, turn) {
 async function runTurn(text) {
   const value = (text || "").trim();
   if (!value || activeTurn) return;
+  if (activeImageGeneration) { toast("Wait for image generation to finish.", "error"); return; }
   if (!getKey()) {
     openModal();
     toast("Add your OpenRouter API key first.", "error");
@@ -664,12 +805,12 @@ function scheduleListening(delay, session = callSession) {
   clearListenTimer();
   listenTimer = setTimeout(() => {
     listenTimer = null;
-    if (liveMode && session === callSession && !activeTurn) startListening({ live: true, session });
+    if (liveMode && session === callSession && !activeTurn && !activeImageGeneration) startListening({ live: true, session });
   }, delay);
 }
 
 function startListening({ live = false, session = callSession } = {}) {
-  if (!SpeechRecognitionApi || recognition || activeTurn) return;
+  if (!SpeechRecognitionApi || recognition || activeTurn || activeImageGeneration) return;
   const rec = new SpeechRecognitionApi();
   const token = ++recognitionToken;
   recognition = rec;
@@ -742,6 +883,7 @@ micBtn.addEventListener("click", () => {
 
 // ------------------------------------------------------------------ half-duplex live conversation
 async function startLive() {
+  if (activeImageGeneration) { toast("Wait for image generation to finish.", "error"); return; }
   if (!SpeechRecognitionApi) {
     toast("Live voice conversation requires Chrome, Edge, or another browser with speech recognition.", "error");
     return;

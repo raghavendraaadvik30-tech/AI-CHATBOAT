@@ -25,6 +25,10 @@ moves her **jaw and mouth** while she answers, powered by the
   listen → think → speak → acoustic pause → listen. The microphone is closed
   while Aria speaks, which prevents speaker output from feeding back as a new
   question. Use the red ■ control to interrupt a response safely.
+- **Stability AI image generation** — enter a Stability key, type an image
+  prompt, and press the picture button beside 🎤. Choose Stable Image Core or
+  Ultra and a saved aspect ratio. Generated WebP images appear as dedicated
+  cards with cancellation and download controls.
 - **Vision (camera)** — tap 📷 to share your webcam. A live preview appears over
   the avatar. Each turn can include two chronological frames, allowing Aria to
   inspect static details (fingers, shirt colour, objects) and simple visible
@@ -43,14 +47,16 @@ moves her **jaw and mouth** while she answers, powered by the
 
 1. Serve the project: `python3 -m http.server 8000`.
 2. Open `http://localhost:8000` in Chrome or Edge.
-3. Click **⚙ settings**, add your OpenRouter API key and optional Google Gemini
-   API key, choose English or Kannada, and leave speech mode on Automatic.
-4. Tap 📞 for a no-echo hands-free conversation, or use 🎤 for one voice turn.
+3. Click **⚙ settings** and add the provider keys you use: OpenRouter for
+   chat/vision, Google for primary Kannada speech, and Stability AI for image
+   generation. Leave speech mode on Automatic.
+4. Tap 📞 for a no-echo conversation, 🎤 for one voice turn, or type an image
+   prompt and press the picture button to generate an image.
 
 Your keys are stored in the browser's `localStorage`. The OpenRouter key is
-sent to OpenRouter for chat/vision and fallback speech. The Google key is sent
-only to Google's native Gemini API for neural speech. For public deployment,
-move both credentials behind a server-side proxy.
+sent only to OpenRouter, the Google key only to Google's native Gemini API,
+and the Stability key only to `api.stability.ai`. For public deployment, move
+all provider credentials behind a server-side proxy.
 
 ## 📁 Project structure
 

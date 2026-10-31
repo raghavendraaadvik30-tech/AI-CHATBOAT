@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=4" />
+  <link rel="stylesheet" href="style.css?v=5" />
 
   <!-- Three.js via import map (jsDelivr: reliable CORS + binary assets) -->
   <script type="importmap">
@@ -68,7 +68,7 @@
       </header>
 
       <div class="messages" id="messages" aria-live="polite">
-        <div class="empty-hint" id="emptyHint">Add your API key in ⚙, then chat with Aria — type, talk (🎤), or show her your camera (📷).</div>
+        <div class="empty-hint" id="emptyHint">Add your keys in ⚙, then chat with Aria — type, talk (🎤), show your camera (📷), or generate an image with the picture button.</div>
       </div>
 
       <div class="typing" id="typing" hidden>
@@ -78,6 +78,9 @@
       <form class="composer" id="composer">
         <button type="button" class="mic-btn" id="micBtn" title="Speak to Aria" aria-label="Voice command">
           <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V22h2v-3.08A7 7 0 0 0 19 12h-2z"/></svg>
+        </button>
+        <button type="button" class="mic-btn image-btn" id="imageBtn" title="Generate image from prompt" aria-label="Generate image">
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Zm0 16H5l3.5-4.5 2.5 3 3.5-4.5L19 19ZM8.5 10.5A2.5 2.5 0 1 1 8.5 5a2.5 2.5 0 0 1 0 5.5Z"/></svg>
         </button>
         <input
           id="input"
@@ -106,6 +109,11 @@
         <span>Google Gemini API key</span>
         <input id="googleApiKey" type="password" placeholder="AQ.Ab…" autocomplete="off" />
         <small>Used directly for primary Kannada neural speech. Stored only in this browser.</small>
+      </label>
+      <label class="field">
+        <span>Stability AI API key</span>
+        <input id="stabilityApiKey" type="password" placeholder="sk-…" autocomplete="off" />
+        <small>Used only for image generation through Stability AI. Never committed to the repository.</small>
       </label>
       <label class="field">
         <span>Model</span>
@@ -145,6 +153,23 @@
         <small>Used when browser speech is selected or neural speech is unavailable.</small>
       </label>
       <label class="field">
+        <span>Image quality</span>
+        <select id="imageEngineSelect">
+          <option value="core">Stable Image Core (fast)</option>
+          <option value="ultra">Stable Image Ultra (highest quality)</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Image aspect ratio</span>
+        <select id="imageAspectSelect">
+          <option value="1:1">Square · 1:1</option>
+          <option value="16:9">Landscape · 16:9</option>
+          <option value="9:16">Portrait · 9:16</option>
+          <option value="4:3">Classic landscape · 4:3</option>
+          <option value="3:4">Classic portrait · 3:4</option>
+        </select>
+      </label>
+      <label class="field">
         <span>Personality (system prompt)</span>
         <textarea id="persona" rows="3"></textarea>
       </label>
@@ -159,7 +184,7 @@
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
   <!-- 3D avatar engine, followed by app coordinator -->
-  <script type="module" src="avatar3d.js?v=4"></script>
-  <script type="module" src="app.js?v=4"></script>
+  <script type="module" src="avatar3d.js?v=5"></script>
+  <script type="module" src="app.js?v=5"></script>
 </body>
 </html>
