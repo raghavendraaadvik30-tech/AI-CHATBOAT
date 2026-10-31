@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aria · AI Avatar Chat</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="bg-orbs">
+    <span class="orb orb-1"></span>
+    <span class="orb orb-2"></span>
+    <span class="orb orb-3"></span>
+  </div>
+
+  <main class="app">
+    <!-- ============ AVATAR STAGE ============ -->
+    <section class="stage" aria-label="AI avatar">
+      <div class="avatar-glow"></div>
+      <div class="avatar-float" id="avatarFloat">
+        <svg id="avatar" class="avatar" viewBox="0 0 320 360" role="img" aria-label="Aria avatar">
+          <defs>
+            <radialGradient id="skin" cx="50%" cy="38%" r="70%">
+              <stop offset="0%" stop-color="#ffe8d6" />
+              <stop offset="100%" stop-color="#f3c6a8" />
+            </radialGradient>
+            <linearGradient id="hair" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#5b3a8e" />
+              <stop offset="100%" stop-color="#2e1a63" />
+            </linearGradient>
+            <linearGradient id="hairShine" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#9b6bd6" />
+              <stop offset="100%" stop-color="#5b3a8e" />
+            </linearGradient>
+            <linearGradient id="shirt" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#2de2e6" />
+              <stop offset="100%" stop-color="#1368ce" />
+            </linearGradient>
+            <radialGradient id="cheek" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#ff9a9e" stop-opacity="0.55" />
+              <stop offset="100%" stop-color="#ff9a9e" stop-opacity="0" />
+            </radialGradient>
+          </defs>
+
+          <!-- shoulders / body -->
+          <path class="body" d="M60 360 C70 285 120 262 160 262 C200 262 250 285 260 360 Z" fill="url(#shirt)" />
+          <path class="collar" d="M135 268 L160 300 L185 268 Z" fill="#ffffff" opacity="0.18" />
+
+          <!-- neck -->
+          <rect x="140" y="222" width="40" height="52" rx="18" fill="url(#skin)" />
+          <path d="M140 250 q20 18 40 0 v-28 h-40 Z" fill="#e0a98a" opacity="0.5" />
+
+          <!-- back hair -->
+          <path d="M78 150 C70 60 150 28 160 28 C170 28 250 60 242 150 C250 210 236 250 220 262 L100 262 C84 250 70 210 78 150 Z" fill="url(#hair)" />
+
+          <!-- face -->
+          <ellipse class="face" cx="160" cy="160" rx="82" ry="94" fill="url(#skin)" />
+
+          <!-- ears -->
+          <circle cx="80" cy="168" r="16" fill="url(#skin)" />
+          <circle cx="240" cy="168" r="16" fill="url(#skin)" />
+
+          <!-- cheeks -->
+          <ellipse cx="112" cy="188" rx="22" ry="15" fill="url(#cheek)" />
+          <ellipse cx="208" cy="188" rx="22" ry="15" fill="url(#cheek)" />
+
+          <!-- eyebrows -->
+          <path class="brow" d="M106 126 q24 -14 48 -2" fill="none" stroke="#3a2558" stroke-width="5" stroke-linecap="round" />
+          <path class="brow" d="M166 124 q24 -12 48 2" fill="none" stroke="#3a2558" stroke-width="5" stroke-linecap="round" />
+
+          <!-- eyes -->
+          <g class="eye eye-left">
+            <ellipse class="eye-white" cx="130" cy="152" rx="20" ry="15" fill="#ffffff" />
+            <circle class="iris" cx="130" cy="153" r="9" fill="#6b3fa0" />
+            <circle class="pupil" cx="130" cy="153" r="4.5" fill="#1a0f2e" />
+            <circle class="glint" cx="134" cy="149" r="2.6" fill="#ffffff" />
+            <rect class="lid" x="108" y="134" width="44" height="34" rx="14" fill="url(#skin)" />
+          </g>
+          <g class="eye eye-right">
+            <ellipse class="eye-white" cx="190" cy="152" rx="20" ry="15" fill="#ffffff" />
+            <circle class="iris" cx="190" cy="153" r="9" fill="#6b3fa0" />
+            <circle class="pupil" cx="190" cy="153" r="4.5" fill="#1a0f2e" />
+            <circle class="glint" cx="194" cy="149" r="2.6" fill="#ffffff" />
+            <rect class="lid" x="168" y="134" width="44" height="34" rx="14" fill="url(#skin)" />
+          </g>
+
+          <!-- nose -->
+          <path d="M158 160 q-6 18 -2 24 q4 4 8 0" fill="none" stroke="#e0a98a" stroke-width="3.5" stroke-linecap="round" />
+
+          <!-- mouth -->
+          <g class="mouth-group">
+            <path class="mouth" d="M138 206 q22 16 44 0 q-22 10 -44 0 Z" fill="#b23a5a" />
+            <path class="lip" d="M138 206 q22 14 44 0" fill="none" stroke="#9b2c4a" stroke-width="2.5" stroke-linecap="round" />
+          </g>
+
+          <!-- front hair / bangs -->
+          <path d="M80 152 C74 70 150 30 160 30 C170 30 170 92 150 108 C176 100 196 108 208 128 C214 86 246 92 240 150 C236 110 210 128 206 150 C202 118 150 128 150 128 C120 128 92 120 80 152 Z" fill="url(#hairShine)" />
+        </svg>
+      </div>
+
+      <div class="status-pill" id="statusPill">
+        <span class="status-dot"></span>
+        <span id="statusText">Online</span>
+      </div>
+      <h1 class="avatar-name">Aria</h1>
+      <p class="avatar-tag">your friendly AI companion</p>
+    </section>
+
+    <!-- ============ CHAT PANEL ============ -->
+    <section class="chat" aria-label="Chat">
+      <header class="chat-head">
+        <div class="chat-head-title">Chat with Aria</div>
+        <button id="settingsBtn" class="icon-btn" title="Settings" aria-label="Settings">⚙</button>
+      </header>
+
+      <div class="messages" id="messages" aria-live="polite"></div>
+
+      <div class="typing" id="typing" hidden>
+        <span></span><span></span><span></span>
+      </div>
+
+      <form class="composer" id="composer">
+        <input
+          id="input"
+          class="composer-input"
+          type="text"
+          placeholder="Say something to Aria…"
+          autocomplete="off"
+        />
+        <button type="submit" class="send-btn" id="sendBtn" aria-label="Send">
+          <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M3 11l18-8-8 18-2-7-8-3z"/></svg>
+        </button>
+      </form>
+    </section>
+  </main>
+
+  <!-- ============ SETTINGS MODAL ============ -->
+  <div class="modal-backdrop" id="modal" hidden>
+    <div class="modal">
+      <h2>Settings</h2>
+      <label class="field">
+        <span>OpenRouter API key</span>
+        <input id="apiKey" type="password" placeholder="sk-or-v1-…" />
+        <small>Stored only in this browser (localStorage). Never sent anywhere except OpenRouter.</small>
+      </label>
+      <label class="field">
+        <span>Model</span>
+        <input id="model" type="text" placeholder="openai/gpt-4o-mini" />
+      </label>
+      <label class="field">
+        <span>Personality (system prompt)</span>
+        <textarea id="persona" rows="3"></textarea>
+      </label>
+      <div class="modal-actions">
+        <button class="btn-ghost" id="closeModal">Cancel</button>
+        <button class="btn-primary" id="saveSettings">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
