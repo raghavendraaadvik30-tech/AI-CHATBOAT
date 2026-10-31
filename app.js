@@ -111,6 +111,7 @@ function stopTalking() { window.ariaAvatar?.stopTalking(); }
 function setStatus(text, thinking = false) {
   statusText.textContent = text;
   statusPill.classList.toggle("thinking", thinking);
+  window.ariaAvatar?.setThinking?.(thinking);
 }
 
 // ------------------------------------------------------------------ messages
@@ -325,6 +326,7 @@ let listening = false;
 function stopListening() {
   listening = false;
   micBtn.classList.remove("listening");
+  window.ariaAvatar?.setListening?.(false);
   try { recog && recog.stop(); } catch {}
 }
 
@@ -336,6 +338,7 @@ function startListening() {
   input.placeholder = "Listening… speak now";
   listening = true;
   micBtn.classList.add("listening");
+  window.ariaAvatar?.setListening?.(true);
   try { recog.start(); } catch {}
 }
 

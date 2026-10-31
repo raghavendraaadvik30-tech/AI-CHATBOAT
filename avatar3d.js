@@ -108,6 +108,8 @@ let sacX = 0, sacY = 0;
 let nextBlink = 1.2, blinkT = -1, blink = 0;
 let browT = -1, nextBrow = 3;
 let nod = 0;
+let thinking = false, listening = false;
+let microSmile = 0, nextSmile = 6;
 
 // pointer tracking — she looks toward your cursor (big "alive" boost)
 let px = 0, py = 0, tpx = 0, tpy = 0;
@@ -333,6 +335,7 @@ new GLTFLoader()
       basePos.copy(faceRoot.position);
       frameFace();
       if (loaderEl) loaderEl.remove();
+      container.classList.add("ready"); // trigger CSS fade-in
       resize();
     },
     (ev) => { if (ev.total) setLoader(`Loading Aria… ${Math.round((ev.loaded / ev.total) * 100)}%`); },
@@ -419,6 +422,23 @@ function animate() {
     for (const [k, v] of Object.entries(emotion)) setT(k, v);
     setT("browInnerUp", 0.05 + 0.03 * Math.sin(t * 0.7));
 
+    // attentive listening pose — engaged, brows up, looking at you
+    if (listening) {
+      setT("browOuterUp_L", 0.18); setT("browOuterUp_R", 0.18); setT("browInnerUp", 0.2);
+      setT("eyeWide_L", 0.12); setT("eyeWide_R", 0.12);
+      setT("mouthSmile_L", 0.12); setT("mouthSmile_R", 0.12);
+    }
+    // thinking — a touch of concentration
+    if (thinking) { setT("browInnerUp", 0.22); setT("browDown_L", 0.1); setT("browDown_R", 0.1); }
+
+    // spontaneous warm micro-smile now and then
+    nextSmile -= dt;
+    if (nextSmile <= 0 && !thinking) { microSmile = 1; nextSmile = 7 + Math.random() * 8; }
+    microSmile = Math.max(0, microSmile - dt * 0.4);
+    const sm = Math.sin(Math.min(1, microSmile) * Math.PI) * 0.18;
+    setT("mouthSmile_L", sm); setT("mouthSmile_R", sm);
+    setT("cheekSquint_L", sm * 0.6); setT("cheekSquint_R", sm * 0.6);
+
     // blink timing
     nextBlink -= dt;
     if (blinkT < 0 && nextBlink <= 0) { blinkT = 0; nextBlink = 2 + Math.random() * 4; }
@@ -450,6 +470,8 @@ function animate() {
     }
     gazeTX = Math.max(-1, Math.min(1, px * 0.7 + sacX));
     gazeTY = Math.max(-1, Math.min(1, py * 0.5 + sacY));
+    if (thinking) { gazeTX = -0.45 + 0.1 * Math.sin(t * 1.3); gazeTY = -0.5; } // glance up & away
+    else if (listening) { gazeTX = px * 0.4; gazeTY = py * 0.3; }              // stay on the user
     gazeX += (gazeTX - gazeX) * Math.min(1, dt * 10);
     gazeY += (gazeTY - gazeY) * Math.min(1, dt * 10);
     applyGaze();
@@ -489,7 +511,8 @@ function animate() {
     const idleX = 0.028 * Math.sin(t * 0.63 + 1) + 0.012 * Math.sin(t * 0.23);
     faceRoot.rotation.y = baseRot.y + idleY + px * 0.22;
     faceRoot.rotation.x = baseRot.x + idleX + py * 0.13 + nod * 0.03 * Math.sin(t * 6.5);
-    faceRoot.rotation.z = baseRot.z + 0.014 * Math.sin(t * 0.4) - px * 0.03;
+    const tiltZ = (listening ? 0.09 : 0) + (thinking ? 0.06 : 0);
+    faceRoot.rotation.z = baseRot.z + 0.014 * Math.sin(t * 0.4) - px * 0.03 + tiltZ;
     faceRoot.position.y = basePos.y + 0.004 * Math.sin(t * 1.1); // breathing
   }
 
@@ -512,6 +535,8 @@ window.ariaAvatar = {
   startTalking() { cancelSpeak(); talking = true; },
   stopTalking() { cancelSpeak(); },
   setVoice(on) { voiceOn = !!on; if (!on) { try { window.speechSynthesis.cancel(); } catch {} } },
+  setThinking(on) { thinking = !!on; },
+  setListening(on) { listening = !!on; },
   get voiceOn() { return voiceOn; },
   get ttsSupported() { return !!(window.speechSynthesis && window.SpeechSynthesisUtterance); },
 };
