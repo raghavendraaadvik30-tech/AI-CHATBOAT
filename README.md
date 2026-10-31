@@ -14,18 +14,13 @@ moves her **jaw and mouth** while she answers, powered by the
   the full **ARKit 52-blendshape** set, lit with image-based lighting for
   lifelike skin. (No Ready Player Me dependency — that service shut down in
   Jan 2026; assets load from the reliable jsDelivr CDN.)
-- **Multi-provider neural speech** — SonexLabs Panini is the first speech
-  provider for low-latency multilingual output, followed by Google Gemini,
-  OpenRouter, and the browser voice. Kannada text is auto-detected by Sonex;
-  an optional voice ID can select a specific SonexLabs voice.
-- **Language-aware provider routing** — Kannada tries SonexLabs, OpenRouter,
-  then Google. English, Hindi, Tamil, Telugu, and Malayalam try OpenRouter first,
-  followed by SonexLabs and Google. Every provider has a finite deadline so an
-  exhausted or unconfigured service cannot leave the avatar silent forever.
-- **Waveform-assisted lip-sync** — neural speech is decoded through Web Audio.
-  Exact audio duration controls viseme pacing, while live waveform energy closes
-  the mouth during pauses. Kannada and English have detailed mouth maps; other
-  scripts use a waveform-driven universal jaw/lip fallback.
+- **OpenRouter multilingual speech** — one OpenRouter key handles chat, camera
+  vision, and neural speech for English, Kannada, Hindi, Tamil, Telugu, and
+  Malayalam. Browser speech is the only fallback and has a finite timeout.
+- **Waveform-assisted lip-sync** — OpenRouter speech is decoded through Web
+  Audio. Exact audio duration controls viseme pacing, while live waveform
+  energy closes the mouth during pauses. Kannada and English have detailed
+  mouth maps; other scripts use a waveform-driven universal jaw/lip fallback.
 - **No-echo live conversation** — 📞 starts a coordinated half-duplex call:
   listen → think → speak → acoustic pause → listen. The microphone is closed
   while Aria speaks, which prevents speaker output from feeding back as a new
@@ -60,21 +55,18 @@ moves her **jaw and mouth** while she answers, powered by the
    same-origin proxy:
    ```bash
    export STABILITY_API_KEY="your-rotated-stability-key"
-   export SONEX_API_KEY="your-rotated-sonex-key"
-   # Optional: export SONEX_VOICE_ID="voice-id-from-sonex-dashboard"
    npm start
    ```
 2. Open `http://localhost:8000` in Chrome or Edge.
-3. Click **⚙ settings** and add any keys not supplied to the server. OpenRouter
-   handles chat/vision, SonexLabs is primary Kannada speech, Google and
-   OpenRouter provide speech fallbacks, and Stability AI generates images.
+3. Click **⚙ settings**. OpenRouter handles chat, camera vision, and speech;
+   Stability AI handles image generation. No other provider key is used.
 4. Choose English, Kannada, Hindi, Tamil, Telugu, or Malayalam. Tap 📞 for a
    no-echo conversation or 🎤 for one voice turn. Ask “generate an image of…”
    by text or voice to route that request automatically to Stability AI.
 
 Your keys are stored in the browser's `localStorage` only when entered in
-Settings. Server environment keys stay server-side. OpenRouter, Google,
-SonexLabs, and Stability credentials are sent only to their matching provider.
+Settings. Server environment keys stay server-side. OpenRouter and Stability
+credentials are sent only to their matching provider.
 
 ## 📁 Project structure
 
@@ -97,10 +89,9 @@ SonexLabs, and Stability credentials are sent only to their matching provider.
 
 ## ⚠️ Security note
 
-The Node proxy keeps `STABILITY_API_KEY`, `SONEX_API_KEY`, and optional
-`SONEX_VOICE_ID` server-side. OpenRouter and Google credentials are still
+The Node proxy keeps `STABILITY_API_KEY` server-side. The OpenRouter key is
 stored in browser `localStorage` for this local/personal demo. Before a public
-release, proxy those providers too, then add authentication and rate limiting.
+release, proxy OpenRouter too, then add authentication and rate limiting.
 
 ## 🛠️ Customise
 

@@ -1,5 +1,5 @@
 // ========================================================================
-// Aria — chat, camera vision, bilingual speech and half-duplex live calls
+// Aria — chat, camera vision, multilingual speech and half-duplex live calls
 // ========================================================================
 
 const KEY_STORE = "aria.apiKey";
@@ -10,15 +10,10 @@ const VOICE_NAME_STORE = "aria.voiceName";
 const LANGUAGE_STORE = "aria.language";
 const TTS_MODE_STORE = "aria.ttsMode";
 const TTS_MODEL_STORE = "aria.ttsModel";
-const GOOGLE_KEY_STORE = "aria.googleApiKey";
-const GOOGLE_TTS_MODEL_STORE = "aria.googleTtsModel";
-const SONEX_KEY_STORE = "aria.sonexApiKey";
-const SONEX_VOICE_STORE = "aria.sonexVoiceId";
 const STABILITY_KEY_STORE = "aria.stabilityApiKey";
 const IMAGE_ENGINE_STORE = "aria.imageEngine";
 const IMAGE_ASPECT_STORE = "aria.imageAspect";
 const DEFAULT_TTS_MODEL = "google/gemini-3.1-flash-tts-preview";
-const DEFAULT_GOOGLE_TTS_MODEL = "gemini-3.1-flash-tts-preview";
 
 const DEFAULT_MODEL = "openai/gpt-4o-mini";
 const DEFAULT_PERSONA =
@@ -88,9 +83,6 @@ const statusText = el("statusText");
 const speechProvider = el("speechProvider");
 const modal = el("modal");
 const apiKeyInput = el("apiKey");
-const googleApiKeyInput = el("googleApiKey");
-const sonexApiKeyInput = el("sonexApiKey");
-const sonexVoiceInput = el("sonexVoiceId");
 const stabilityApiKeyInput = el("stabilityApiKey");
 const modelInput = el("model");
 const personaInput = el("persona");
@@ -98,7 +90,6 @@ const voiceSelect = el("voiceSelect");
 const languageSelect = el("languageSelect");
 const ttsModeSelect = el("ttsModeSelect");
 const ttsModelInput = el("ttsModel");
-const googleTtsModelInput = el("googleTtsModel");
 const imageEngineSelect = el("imageEngineSelect");
 const imageAspectSelect = el("imageAspectSelect");
 const imageBtn = el("imageBtn");
@@ -131,23 +122,27 @@ const store = {
     try { localStorage.setItem(key, value); }
     catch { storageWorks = false; memStore[key] = value; }
   },
+  remove(key) {
+    delete memStore[key];
+    try { localStorage.removeItem(key); } catch { storageWorks = false; }
+  },
 };
 
+function removeRetiredProviderData() {
+  ["aria.googleApiKey", "aria.googleTtsModel", "aria.sonexApiKey", "aria.sonexVoiceId"]
+    .forEach((key) => store.remove(key));
+}
+
 function getKey() { return store.get(KEY_STORE) || ""; }
-function getGoogleKey() { return store.get(GOOGLE_KEY_STORE) || ""; }
-function getSonexKey() { return store.get(SONEX_KEY_STORE) || ""; }
-function getSonexVoiceId() { return store.get(SONEX_VOICE_STORE) || ""; }
 function getStabilityKey() { return store.get(STABILITY_KEY_STORE) || ""; }
 function getImageEngine() { return store.get(IMAGE_ENGINE_STORE) || "core"; }
 function getImageAspect() { return store.get(IMAGE_ASPECT_STORE) || "1:1"; }
 function getModel() { return store.get(MODEL_STORE) || DEFAULT_MODEL; }
 function getPersona() { return store.get(PERSONA_STORE) || DEFAULT_PERSONA; }
 function getTtsMode() {
-  const mode = store.get(TTS_MODE_STORE) || "auto";
-  return mode === "cloud" ? "openrouter" : mode;
+  return store.get(TTS_MODE_STORE) === "browser" ? "browser" : "openrouter";
 }
 function getTtsModel() { return store.get(TTS_MODEL_STORE) || DEFAULT_TTS_MODEL; }
-function getGoogleTtsModel() { return store.get(GOOGLE_TTS_MODEL_STORE) || DEFAULT_GOOGLE_TTS_MODEL; }
 function getLanguage() {
   const value = store.get(LANGUAGE_STORE) || "en-IN";
   return LANGUAGES[value] ? value : "en-IN";
@@ -193,16 +188,12 @@ function populateVoices() {
 
 function loadSettings() {
   apiKeyInput.value = getKey();
-  googleApiKeyInput.value = getGoogleKey();
-  sonexApiKeyInput.value = getSonexKey();
-  sonexVoiceInput.value = getSonexVoiceId();
   stabilityApiKeyInput.value = getStabilityKey();
   modelInput.value = getModel();
   personaInput.value = getPersona();
   languageSelect.value = getLanguage();
-  ttsModeSelect.value = getTtsMode() === "cloud" ? "openrouter" : getTtsMode();
+  ttsModeSelect.value = getTtsMode();
   ttsModelInput.value = getTtsModel();
-  googleTtsModelInput.value = getGoogleTtsModel();
   imageEngineSelect.value = getImageEngine();
   imageAspectSelect.value = getImageAspect();
   populateVoices();
@@ -241,16 +232,12 @@ const saveBtn = el("saveSettings");
 saveBtn.addEventListener("click", () => {
   const language = LANGUAGES[languageSelect.value] ? languageSelect.value : "en-IN";
   store.set(KEY_STORE, apiKeyInput.value.trim());
-  store.set(GOOGLE_KEY_STORE, googleApiKeyInput.value.trim());
-  store.set(SONEX_KEY_STORE, sonexApiKeyInput.value.trim());
-  store.set(SONEX_VOICE_STORE, sonexVoiceInput.value.trim());
   store.set(STABILITY_KEY_STORE, stabilityApiKeyInput.value.trim());
   store.set(MODEL_STORE, modelInput.value.trim() || DEFAULT_MODEL);
   store.set(PERSONA_STORE, personaInput.value.trim() || DEFAULT_PERSONA);
   store.set(LANGUAGE_STORE, language);
-  store.set(TTS_MODE_STORE, ttsModeSelect.value || "auto");
+  store.set(TTS_MODE_STORE, ttsModeSelect.value === "browser" ? "browser" : "openrouter");
   store.set(TTS_MODEL_STORE, ttsModelInput.value.trim() || DEFAULT_TTS_MODEL);
-  store.set(GOOGLE_TTS_MODEL_STORE, googleTtsModelInput.value.trim() || DEFAULT_GOOGLE_TTS_MODEL);
   store.set(IMAGE_ENGINE_STORE, imageEngineSelect.value || "core");
   store.set(IMAGE_ASPECT_STORE, imageAspectSelect.value || "1:1");
   document.documentElement.lang = language;
@@ -264,7 +251,7 @@ saveBtn.addEventListener("click", () => {
     closeModal();
     setPhase("idle");
     if (language === "kn-IN" && getTtsMode() === "browser" && !hasVoiceForLanguage(language)) {
-      toast("No Kannada system voice was found. Select Automatic or OpenRouter neural voice for spoken Kannada.", "error", 9000);
+      toast("No Kannada system voice was found. Select OpenRouter neural voice for spoken Kannada.", "error", 9000);
     }
     if (!storageWorks) toast("Browser storage is blocked; these settings last only for this page session.", "error");
   }, 350);
@@ -792,122 +779,6 @@ async function askOpenRouter(text, frames, turn) {
   return reply;
 }
 
-function base64ToBytes(value) {
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-
-function pcm16ToWav(pcm, sampleRate = 24000, channels = 1) {
-  const header = new ArrayBuffer(44);
-  const view = new DataView(header);
-  const write = (offset, value) => [...value].forEach((char, i) => view.setUint8(offset + i, char.charCodeAt(0)));
-  write(0, "RIFF");
-  view.setUint32(4, 36 + pcm.byteLength, true);
-  write(8, "WAVE"); write(12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, channels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * channels * 2, true);
-  view.setUint16(32, channels * 2, true);
-  view.setUint16(34, 16, true);
-  write(36, "data");
-  view.setUint32(40, pcm.byteLength, true);
-  const wav = new Uint8Array(44 + pcm.byteLength);
-  wav.set(new Uint8Array(header), 0);
-  wav.set(pcm, 44);
-  return wav.buffer;
-}
-
-async function fetchSonexSpeech(text, turn, signal = turn.controller.signal) {
-  const voiceId = getSonexVoiceId();
-
-  // Preferred same-origin proxy: avoids CORS and keeps the key server-side.
-  if (location.protocol !== "file:") {
-    const proxy = await fetch("/api/sonex/speech", {
-      method: "POST",
-      signal,
-      headers: { "Content-Type": "application/json", Accept: "audio/wav, application/json" },
-      body: JSON.stringify({ text, voiceId }),
-    });
-    if (proxy.ok) return proxy.arrayBuffer();
-    let body = {};
-    try { body = await proxy.json(); } catch {}
-    const unavailable = proxy.status === 404 || proxy.status === 405 || proxy.status === 501
-      || (proxy.status === 503 && body.code === "sonex_proxy_unconfigured");
-    if (!unavailable) throw new Error(`Sonex proxy ${proxy.status}: ${body.detail || body.error || "request failed"}`);
-  }
-
-  const key = getSonexKey();
-  if (!key) throw new Error("SonexLabs key is not configured");
-  const payload = { text, output_format: "wav", speed: 1 };
-  if (voiceId) payload.voice_id = voiceId;
-  try {
-    const response = await fetch("https://api.sonexlabs.com/v1/speech/stream", {
-      method: "POST",
-      signal,
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-        Accept: "audio/wav",
-      },
-      body: JSON.stringify(payload),
-    });
-    if (!response.ok) {
-      const detail = await response.text();
-      throw new Error(`SonexLabs speech ${response.status}: ${detail.slice(0, 180)}`);
-    }
-    const contentType = String(response.headers.get("content-type") || "");
-    if (!contentType.startsWith("audio/")) {
-      const detail = await response.text();
-      throw new Error(`SonexLabs returned non-audio data: ${detail.slice(0, 160)}`);
-    }
-    return response.arrayBuffer();
-  } catch (error) {
-    if (error?.name === "TypeError") {
-      throw new Error("Direct SonexLabs speech was blocked by the browser. Run npm start with SONEX_API_KEY to use the speech proxy.");
-    }
-    throw error;
-  }
-}
-
-async function fetchGoogleSpeech(text, turn, signal = turn.controller.signal) {
-  const key = getGoogleKey();
-  if (!key) throw new Error("Google Gemini key is not configured");
-  const model = encodeURIComponent(getGoogleTtsModel());
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-    method: "POST",
-    signal,
-    headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text }] }],
-      generationConfig: {
-        responseModalities: ["AUDIO"],
-        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Orus" } } },
-      },
-    }),
-  });
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(`Google speech ${response.status}: ${detail.slice(0, 180)}`);
-  }
-  const data = await response.json();
-  const parts = data?.candidates?.flatMap((candidate) => candidate?.content?.parts || []) || [];
-  const inline = parts.find((part) => part.inlineData?.data || part.inline_data?.data);
-  const payload = inline?.inlineData || inline?.inline_data;
-  if (!payload?.data) throw new Error("Google speech returned no audio data");
-
-  const bytes = base64ToBytes(payload.data);
-  const mime = (payload.mimeType || payload.mime_type || "").toLowerCase();
-  if (mime.includes("l16") || mime.includes("pcm")) {
-    const rate = Number(mime.match(/rate[=;](\d+)/)?.[1] || 24000);
-    return pcm16ToWav(bytes, rate, 1);
-  }
-  return bytes.buffer;
-}
-
 async function fetchOpenRouterSpeech(text, turn, signal = turn.controller.signal) {
   const response = await fetch("https://openrouter.ai/api/v1/audio/speech", {
     method: "POST",
@@ -955,39 +826,12 @@ async function runSpeechProvider(provider, label, timeoutMs, text, turn) {
 }
 
 async function fetchNeuralSpeech(text, turn) {
-  const mode = getTtsMode();
-  const isKannada = turn.language === "kn-IN";
-  const automatic = isKannada
-    ? [fetchSonexSpeech, fetchOpenRouterSpeech, fetchGoogleSpeech]
-    : [fetchOpenRouterSpeech, fetchSonexSpeech, fetchGoogleSpeech];
-  const orders = {
-    sonex: [fetchSonexSpeech, fetchOpenRouterSpeech, fetchGoogleSpeech],
-    google: [fetchGoogleSpeech, fetchOpenRouterSpeech, fetchSonexSpeech],
-    openrouter: [fetchOpenRouterSpeech, fetchSonexSpeech, fetchGoogleSpeech],
-    auto: automatic,
-    browser: automatic,
-  };
-  const providers = orders[mode] || automatic;
-  const errors = [];
-  for (const provider of providers) {
-    const providerName = provider === fetchSonexSpeech ? "SonexLabs"
-      : provider === fetchGoogleSpeech ? "Google" : "OpenRouter";
-    const timeoutMs = provider === fetchSonexSpeech ? 30_000 : 40_000;
-    try {
-      const audio = await runSpeechProvider(provider, providerName, timeoutMs, text, turn);
-      return { audio, provider: providerName };
-    } catch (error) {
-      if (error?.name === "AbortError") throw error;
-      errors.push(error.message || String(error));
-    }
-  }
-  throw new Error(errors.join(" | "));
+  const audio = await runSpeechProvider(fetchOpenRouterSpeech, "OpenRouter", 40_000, text, turn);
+  return { audio, provider: "OpenRouter" };
 }
 
 function shouldUseNeuralSpeech(language) {
-  const mode = getTtsMode();
-  if (mode === "browser") return language === "kn-IN" && !hasVoiceForLanguage(language);
-  return mode === "sonex" || mode === "google" || mode === "openrouter" || mode === "auto";
+  return getTtsMode() === "openrouter" || !hasVoiceForLanguage(language);
 }
 
 function typeOut(text, turn) {
@@ -1253,11 +1097,12 @@ callBtn.addEventListener("click", () => { liveMode ? stopLive() : startLive(); }
 
 // ------------------------------------------------------------------ init
 function init() {
+  removeRetiredProviderData();
   loadSettings();
   document.documentElement.lang = getLanguage();
   applyVoice(store.get(VOICE_STORE) !== "off");
   syncAvatarSettings();
-  setSpeechProvider("Automatic voice");
+  setSpeechProvider("OpenRouter voice");
   setPhase("idle");
 }
 init();

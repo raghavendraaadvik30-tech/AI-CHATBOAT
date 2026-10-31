@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=10" />
+  <link rel="stylesheet" href="style.css?v=11" />
 
   <!-- Three.js via import map (jsDelivr: reliable CORS + binary assets) -->
   <script type="importmap">
@@ -52,7 +52,7 @@
       </div>
       <h1 class="avatar-name">Aria</h1>
       <p class="avatar-tag">your friendly AI companion</p>
-      <div class="provider-pill" id="speechProvider"><span></span>Automatic voice</div>
+      <div class="provider-pill" id="speechProvider"><span></span>OpenRouter voice</div>
     </section>
 
     <!-- ============ CHAT PANEL ============ -->
@@ -107,21 +107,6 @@
         <small>Used for chat, camera vision, and fallback speech.</small>
       </label>
       <label class="field">
-        <span>SonexLabs API key</span>
-        <input id="sonexApiKey" type="password" placeholder="vsk_…" autocomplete="off" />
-        <small>Primary Kannada speech provider when the server proxy is not configured.</small>
-      </label>
-      <label class="field">
-        <span>SonexLabs voice ID (optional)</span>
-        <input id="sonexVoiceId" type="text" placeholder="Automatic voice" autocomplete="off" />
-        <small>Leave empty for automatic selection, or copy an ID from your SonexLabs voice library.</small>
-      </label>
-      <label class="field">
-        <span>Google Gemini API key</span>
-        <input id="googleApiKey" type="password" placeholder="AQ.Ab…" autocomplete="off" />
-        <small>Used directly for primary Kannada neural speech. Stored only in this browser.</small>
-      </label>
-      <label class="field">
         <span>Stability AI API key</span>
         <input id="stabilityApiKey" type="password" placeholder="sk-…" autocomplete="off" />
         <small>Optional browser fallback. Recommended: run the Node proxy with STABILITY_API_KEY so the key stays server-side and CORS cannot block generation.</small>
@@ -145,21 +130,14 @@
       <label class="field">
         <span>Speech quality</span>
         <select id="ttsModeSelect">
-          <option value="auto">Automatic (Sonex → Google → OpenRouter)</option>
-          <option value="sonex">SonexLabs Panini voice</option>
-          <option value="google">Google Gemini neural voice</option>
           <option value="openrouter">OpenRouter neural voice</option>
           <option value="browser">Browser system voice</option>
         </select>
       </label>
-      <label class="field">
-        <span>Google speech model</span>
-        <input id="googleTtsModel" type="text" value="gemini-3.1-flash-tts-preview" />
-      </label>
       <label class="field" id="ttsModelField">
         <span>OpenRouter speech model</span>
         <input id="ttsModel" type="text" value="google/gemini-3.1-flash-tts-preview" />
-        <small>Cloud speech uses the same OpenRouter key and may incur model charges.</small>
+        <small>Speech uses the OpenRouter API for every selected language.</small>
       </label>
       <label class="field">
         <span>Browser fallback voice</span>
@@ -200,7 +178,7 @@
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
   <!-- 3D avatar engine, followed by app coordinator -->
-  <script type="module" src="avatar3d.js?v=10"></script>
-  <script type="module" src="app.js?v=10"></script>
+  <script type="module" src="avatar3d.js?v=11"></script>
+  <script type="module" src="app.js?v=11"></script>
 </body>
 </html>
