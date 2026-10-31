@@ -325,6 +325,10 @@ function voicePitchFor(v) { return v && FEMALE_RE.test(v.name) ? 1.12 : 0.95; }
 // Unlock speech during a real user gesture. Browsers (esp. Chrome/Safari)
 // often refuse to speak later — after an async fetch — unless synthesis was
 // kicked off from a genuine interaction first. Call this from a click.
+function reportSpeechError(message) {
+  window.dispatchEvent(new CustomEvent("aria-speech-error", { detail: message }));
+}
+
 function getAudioContext() {
   if (!audioContext) {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -351,6 +355,12 @@ function primeVoice() {
 }
 
 function stopKeepAlive() { if (keepAlive) { clearInterval(keepAlive); keepAlive = null; } }
+
+// Resume Web Audio on every genuine interaction. This prevents mobile Chrome
+// and Safari from silently re-suspending neural speech after an async request.
+document.addEventListener("pointerdown", () => {
+  try { getAudioContext()?.resume?.(); } catch {}
+}, { capture: true });
 
 function stopCloudAudio() {
   cloudAudioActive = false;
@@ -419,7 +429,11 @@ function speak(text) {
         if (generation === speechGeneration && typeof e.charIndex === "number") onBoundary(e.charIndex);
       };
       u.onend = () => { if (generation === speechGeneration) finish(); };
-      u.onerror = () => { if (generation === speechGeneration) finish(); };
+      u.onerror = (event) => {
+        if (generation !== speechGeneration) return;
+        reportSpeechError(`Browser voice failed${event?.error ? `: ${event.error}` : "."}`);
+        finish();
+      };
       try {
         ss.resume();
         ss.speak(u);
@@ -441,11 +455,18 @@ async function speakAudio(text, audioBytes) {
   if (!context) return speak(text);
 
   try { await context.resume(); } catch {}
+  if (context.state !== "running") {
+    reportSpeechError("Audio is blocked by the browser. Tap the 🔊 button once, then start the call again.");
+    return speak(text);
+  }
   let buffer;
   try {
     buffer = await context.decodeAudioData(audioBytes.slice(0));
   } catch {
-    if (generation === speechGeneration) return speak(text);
+    if (generation === speechGeneration) {
+      reportSpeechError("The neural speech response could not be decoded; trying the browser voice.");
+      return speak(text);
+    }
     return;
   }
   if (generation !== speechGeneration) return;
@@ -483,7 +504,12 @@ async function speakAudio(text, audioBytes) {
     cloudAudioActive = true;
     talking = true;
     startSpeechSync(seq, buffer.duration * 1000);
-    source.start(0);
+    try {
+      source.start(0);
+    } catch {
+      reportSpeechError("Neural speech playback could not start. Tap 🔊 once and retry.");
+      finish();
+    }
   });
 }
 

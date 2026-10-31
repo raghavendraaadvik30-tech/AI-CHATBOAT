@@ -206,6 +206,9 @@ saveBtn.addEventListener("click", () => {
 
 try { window.speechSynthesis?.addEventListener?.("voiceschanged", populateVoices); } catch {}
 window.addEventListener("aria-avatar-ready", syncAvatarSettings);
+window.addEventListener("aria-speech-error", (event) => {
+  toast(event.detail || "Speech playback failed.", "error", 10000);
+});
 
 // ------------------------------------------------------------------ voice toggle
 function applyVoice(on) {
@@ -438,7 +441,9 @@ async function fetchCloudSpeech(text, turn) {
 
 function shouldUseCloudSpeech(language) {
   const mode = getTtsMode();
-  return mode === "cloud" || (mode === "auto" && language === "kn-IN");
+  if (mode === "cloud") return true;
+  if (language === "kn-IN" && !hasVoiceForLanguage(language)) return true;
+  return mode === "auto" && language === "kn-IN";
 }
 
 function typeOut(text, turn) {
@@ -654,6 +659,9 @@ async function startLive() {
 
   liveMode = true;
   const session = ++callSession;
+  // A live call is expected to speak. Clear any remembered mute state.
+  store.set(VOICE_STORE, "on");
+  applyVoice(true);
   callBtn.classList.add("active", "calling");
   callBtn.textContent = "📵";
   callBtn.title = "End live conversation";
