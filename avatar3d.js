@@ -72,6 +72,11 @@ function makeStudioBackdrop() {
 
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+// Eyes get their own razor-sharp studio reflection (no blur): bright light panels
+// appear as crisp, jewel-like sparkles in the cornea — "diamond eyes".
+const eyeEnvironment = pmrem.fromScene(new RoomEnvironment(renderer), 0).texture;
+const eyeMaterials = [];
+const EYE_SPARKLE = 2.4;
 
 // studio 3-point rig for flattering, realistic skin
 const keyLight = new THREE.DirectionalLight(0xffe9d2, 2.5);
@@ -90,6 +95,9 @@ topLight.position.set(0, 3, 0.5); scene.add(topLight);
 // correctly placed catchlight sparkle; on matte skin it is only a soft fill.
 const catchLight = new THREE.DirectionalLight(0xffffff, 0.45);
 catchLight.position.set(0.6, 0.9, 3); scene.add(catchLight);
+// a second, smaller sparkle from the other side, like a real photo studio
+const sparkleLight = new THREE.DirectionalLight(0xf2f6ff, 0.22);
+sparkleLight.position.set(-0.9, 1.2, 3); scene.add(sparkleLight);
 
 // cinematic post-processing: subtle bloom for realistic catchlights + rim glow
 const composer = new EffectComposer(renderer);
@@ -723,12 +731,15 @@ function browWeights() {
       const innerX = c.x + inward * r * 1.25, tailX = c.x - inward * r * 1.95;
       const t = (p.x - innerX) / (tailX - innerX);
       if (t > -0.12 && t < 1.12) {
-        const arch = t < 0.65 ? 0.32 * Math.sin((Math.max(0, t) / 0.65) * Math.PI / 2) : 0.32 - 0.62 * Math.pow((t - 0.65) / 0.35, 1.3);
+        const arch = t < 0.65 ? 0.34 * Math.sin((Math.max(0, t) / 0.65) * Math.PI / 2) : 0.34 - 0.64 * Math.pow((t - 0.65) / 0.35, 1.3);
         const line = c.y + r * (1.72 + arch);
         const half = r * (0.3 * Math.pow(1 - Math.min(1, Math.max(0, t)), 0.6) + 0.12);
-        const across = 1 - smooth(half * 0.5, half * 1.1, Math.abs(p.y - line));
+        const dy = p.y - line;
+        // crisp lower edge, softly feathered upper edge (like groomed brows)
+        const across = dy < 0 ? 1 - smooth(half * 0.6, half * 1.0, -dy) : 1 - smooth(half * 0.35, half * 1.2, dy);
         const along = smooth(-0.12, 0.06, t) * (1 - smooth(0.85, 1.12, t));
-        brow[i] = Math.max(brow[i], across * along);
+        const ombre = 0.62 + 0.38 * smooth(0, 0.4, t);   // lighter start -> deeper arch and tail
+        brow[i] = Math.max(brow[i], across * along * ombre);
       }
       // upper lash line along the eye opening, thickening toward the outer corner
       const dx = (p.x - c.x) / (r * 1.05), out = -inward * dx;  // out > 0 toward the temple
@@ -827,12 +838,14 @@ function frameFace() {
           m.roughness = Math.max(m.roughness ?? 0.6, 0.55); // soft skin, not plastic
           m.color?.copy?.(skinBase);
         } else if (isEyeMesh(o) && "roughness" in m) {
-          // moist, glossy eyes: reflections + catchlight make them look alive
-          m.roughness = 0.12;
+          // wet, glass-clear eyes: crisp reflections + catchlights = diamond sparkle
+          m.roughness = 0.035;
           m.metalness = 0;
           m.vertexColors = false;
           m.color?.set?.(0xffffff);
-          if ("envMapIntensity" in m) m.envMapIntensity = 1.6;
+          if ("envMap" in m) m.envMap = eyeEnvironment;
+          if ("envMapIntensity" in m) m.envMapIntensity = EYE_SPARKLE;
+          if (!eyeMaterials.includes(m)) eyeMaterials.push(m);
         }
         m.needsUpdate = true;
       }
@@ -870,6 +883,14 @@ function beginBlink(isFollowUp = false) {
   };
   // ~1 in 7 blinks is only partial, like real people; the rest are complete
   blinkProfile.amp = Math.random() < 0.14 ? 0.55 + Math.random() * 0.2 : 1;
+  // warm "slow blink": softer and longer, with a cheek lift — friendly, attentive
+  blinkProfile.slow = !isFollowUp && (listening || emotionGain > 0.4) && Math.random() < 0.3;
+  if (blinkProfile.slow) {
+    blinkProfile.close = 0.15 + Math.random() * 0.04;
+    blinkProfile.hold = 0.07 + Math.random() * 0.05;
+    blinkProfile.open = 0.24 + Math.random() * 0.06;
+    blinkProfile.amp = 1;
+  }
   blinkT = 0;
   doubleBlinkPending = isFollowUp ? false : Math.random() < 0.14;
 }
@@ -1082,8 +1103,14 @@ function updateScene() {
       if (sL >= 0) influences[sL] = Math.max(influences[sL], blink * 0.18);
       if (sR >= 0) influences[sR] = Math.max(influences[sR], blink * 0.18);
       const cL = idx("cheekSquint_L"), cR = idx("cheekSquint_R");
-      if (cL >= 0) influences[cL] = Math.max(influences[cL], blink * 0.14);
-      if (cR >= 0) influences[cR] = Math.max(influences[cR], blink * 0.14);
+      const cheek = blinkProfile.slow ? 0.32 : 0.14;
+      if (cL >= 0) influences[cL] = Math.max(influences[cL], blink * cheek);
+      if (cR >= 0) influences[cR] = Math.max(influences[cR], blink * cheek);
+      if (blinkProfile.slow) {
+        const mL = idx("mouthSmile_L"), mR = idx("mouthSmile_R");
+        if (mL >= 0) influences[mL] = Math.max(influences[mL], blink * 0.12);
+        if (mR >= 0) influences[mR] = Math.max(influences[mR], blink * 0.12);
+      }
     }
     // upper eyelids drop slightly when looking down (and rise when looking up)
     const lid = Math.max(0, gazeY) * 0.3 + (thinking ? 0.06 : 0);
@@ -1132,6 +1159,16 @@ function updateScene() {
     lastVibeWritten = vibe;
   }
   bloom.strength = 0.22 + vibe * 0.12;
+  // gentle twinkle: the eye sparkle breathes slowly and flares a little when she smiles
+  {
+    const t2 = clock.elapsedTime;
+    const twinkle = 0.5 + 0.5 * Math.sin(t2 * 2.3) * Math.sin(t2 * 0.71 + 1.3);
+    const warmth = THREE.MathUtils.clamp(emotionGain, 0, 1);
+    const sparkle = EYE_SPARKLE * (0.92 + 0.14 * twinkle + 0.12 * warmth) * (1 - 0.85 * blink);
+    for (const m of eyeMaterials) m.envMapIntensity = sparkle;
+    catchLight.intensity = 0.45 + 0.07 * twinkle;
+    sparkleLight.intensity = 0.22 + 0.1 * (1 - twinkle);
+  }
   const tint = talking ? RIM_SPEAK : listening ? RIM_LISTEN : thinking ? RIM_THINK : RIM_IDLE;
   rimLight.color.lerp(tint, Math.min(1, dt * 3));
 
