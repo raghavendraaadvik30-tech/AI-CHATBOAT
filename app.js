@@ -192,6 +192,15 @@ function requestedLanguage(text) {
   return scriptLanguage(text);
 }
 
+function renderLangChips() {
+  const current = getLanguage();
+  document.querySelectorAll(".lang-chip").forEach((chip) => {
+    const on = chip.dataset.lang === current;
+    chip.classList.toggle("active", on);
+    chip.setAttribute("aria-pressed", String(on));
+  });
+}
+
 function setLanguage(code) {
   if (!LANGUAGES[code] || getLanguage() === code) return;
   store.set(LANGUAGE_STORE, code);
@@ -199,6 +208,7 @@ function setLanguage(code) {
   document.documentElement.lang = code;
   window.ariaAvatar?.setLanguage?.(code);
   populateVoices();
+  renderLangChips();
   toast(`Language switched to ${LANGUAGES[code].label}`, "info", 3500);
 }
 
@@ -294,6 +304,7 @@ saveBtn.addEventListener("click", () => {
   document.documentElement.lang = language;
   store.set(VOICE_NAME_STORE, voiceSelect.value || "");
   syncAvatarSettings();
+  renderLangChips();
 
   const original = saveBtn.textContent;
   saveBtn.textContent = "Saved ✓";
@@ -1209,9 +1220,23 @@ function stopLive() {
 callBtn.addEventListener("click", () => { liveMode ? stopLive() : startLive(); });
 
 // ------------------------------------------------------------------ init
+document.querySelectorAll(".lang-chip").forEach((chip) => {
+  chip.addEventListener("click", () => {
+    window.ariaAvatar?.primeVoice?.();
+    setLanguage(chip.dataset.lang);
+  });
+});
+document.querySelectorAll(".quick-chip").forEach((chip) => {
+  chip.addEventListener("click", () => {
+    window.ariaAvatar?.primeVoice?.();
+    runTurn(chip.dataset.prompt);
+  });
+});
+
 function init() {
   removeRetiredProviderData();
   loadSettings();
+  renderLangChips();
   document.documentElement.lang = getLanguage();
   applyVoice(store.get(VOICE_STORE) !== "off");
   syncAvatarSettings();

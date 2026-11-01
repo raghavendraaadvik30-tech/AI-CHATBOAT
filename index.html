@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Aria · AI Avatar · Code Origin.AI</title>
-  <link rel="stylesheet" href="style.css?v=20" />
+  <link rel="stylesheet" href="style.css?v=21" />
 
   <!-- Three.js via import map (jsDelivr: reliable CORS + binary assets) -->
   <script type="importmap">
@@ -73,8 +73,27 @@
         </div>
       </header>
 
+      <div class="lang-bar" id="langBar" role="group" aria-label="Conversation language">
+        <button type="button" class="lang-chip" data-lang="en-IN" title="Talk in English">English</button>
+        <button type="button" class="lang-chip" data-lang="kn-IN" title="Talk in Kannada">ಕನ್ನಡ</button>
+        <button type="button" class="lang-chip" data-lang="hi-IN" title="Talk in Hindi">हिन्दी</button>
+        <button type="button" class="lang-chip" data-lang="ta-IN" title="Talk in Tamil">தமிழ்</button>
+        <button type="button" class="lang-chip" data-lang="te-IN" title="Talk in Telugu">తెలుగు</button>
+        <button type="button" class="lang-chip" data-lang="ml-IN" title="Talk in Malayalam">മലയാളം</button>
+      </div>
+
       <div class="messages" id="messages" aria-live="polite">
-        <div class="empty-hint" id="emptyHint">Chat by typing or voice. Say “generate an image of…” to create art automatically, or use 🎤, 📷 and 📞 for live conversation.</div>
+        <div class="empty-hint" id="emptyHint">
+          <p class="hint-title">Hi, I’m Aria 👋</p>
+          <p>Type, speak, or tap a quick start. Choose your language above — I’ll reply and speak in it.</p>
+          <div class="quick-starts">
+            <button type="button" class="quick-chip" data-prompt="Hello Aria, introduce yourself briefly">👋 Say hello</button>
+            <button type="button" class="quick-chip" data-prompt="I want to talk in Kannada">🗣 Talk in Kannada</button>
+            <button type="button" class="quick-chip" data-prompt="Generate an image of a tiger in a forest">🎨 Create an image</button>
+            <button type="button" class="quick-chip" data-prompt="Tell me an interesting fact">💡 Fun fact</button>
+          </div>
+          <p class="hint-keys">🎤 one question &nbsp;·&nbsp; 📞 live conversation &nbsp;·&nbsp; 📷 let Aria see &nbsp;·&nbsp; ⚙ settings</p>
+        </div>
       </div>
 
       <div class="typing" id="typing" hidden>
@@ -106,11 +125,13 @@
   <div class="modal-backdrop" id="modal" hidden>
     <div class="modal">
       <h2>Settings</h2>
+      <h3 class="modal-section">1 · Chat</h3>
       <label class="field">
         <span>OpenRouter API key</span>
         <input id="apiKey" type="password" placeholder="sk-or-v1-…" autocomplete="off" />
         <small>Used for chat, camera vision, and fallback speech.</small>
       </label>
+      <h3 class="modal-section">2 · Voice &amp; language</h3>
       <label class="field">
         <span>Sarvam AI API key</span>
         <input id="sarvamApiKey" type="password" placeholder="sk_…" autocomplete="off" />
@@ -153,6 +174,8 @@
         </select>
         <small>Used when browser speech is selected or neural speech is unavailable.</small>
       </label>
+      <h3 class="modal-section">3 · Images</h3>
+      <p class="modal-note">Images use Cloudflare Workers AI. Its token is set on the server, not here.</p>
       <label class="field">
         <span>Image aspect ratio</span>
         <select id="imageAspectSelect">
@@ -163,6 +186,7 @@
           <option value="3:4">Classic portrait · 3:4</option>
         </select>
       </label>
+      <h3 class="modal-section">4 · Personality</h3>
       <label class="field">
         <span>Personality (system prompt)</span>
         <textarea id="persona" rows="3"></textarea>
@@ -178,7 +202,7 @@
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
   <!-- 3D avatar engine, followed by app coordinator -->
-  <script type="module" src="avatar3d.js?v=20"></script>
-  <script type="module" src="app.js?v=20"></script>
+  <script type="module" src="avatar3d.js?v=21"></script>
+  <script type="module" src="app.js?v=21"></script>
 </body>
 </html>

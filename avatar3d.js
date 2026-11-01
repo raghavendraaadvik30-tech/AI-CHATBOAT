@@ -79,6 +79,8 @@ const fillLight = new THREE.DirectionalLight(0xbcd3ff, 0.75);
 fillLight.position.set(-2.2, 0.4, 1.6); scene.add(fillLight);
 const rimLight = new THREE.DirectionalLight(0xeaf1ff, 1.9);
 rimLight.position.set(-1.3, 1.7, -2.3); scene.add(rimLight);
+// soft sky/ground bounce so shadows under chin and nose stay natural
+scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x8a5a44, 0.35));
 const topLight = new THREE.DirectionalLight(0xffffff, 0.5);
 topLight.position.set(0, 3, 0.5); scene.add(topLight);
 
@@ -615,7 +617,7 @@ function frameFace() {
   const maxDim = Math.max(size.x, size.y);
   const fov = (camera.fov * Math.PI) / 180;
   let dist = (maxDim / 2) / Math.tan(fov / 2);
-  dist *= 1.45;
+  dist *= 1.3; // closer portrait framing: the face fills the frame
   camera.position.set(center.x, center.y + size.y * 0.04, center.z + dist);
   camera.lookAt(center.x, center.y, center.z);
   camBase.copy(camera.position);
