@@ -62,6 +62,14 @@ moves her **jaw and mouth** while she answers, powered by the
    export SARVAM_API_KEY="your-rotated-sarvam-key"   # Indian-language speech
    npm start
    ```
+   To generate images with **Cloudflare Workers AI** instead of Stability,
+   set these (token needs the Workers AI permission) and leave
+   `STABILITY_API_KEY` unset:
+   ```bash
+   export CLOUDFLARE_ACCOUNT_ID="your-account-id"
+   export CLOUDFLARE_API_TOKEN="your-workers-ai-token"
+   # optional: CLOUDFLARE_IMAGE_MODEL (default @cf/black-forest-labs/flux-1-schnell)
+   ```
 2. Open `http://localhost:8000` in Chrome or Edge.
 3. Click **⚙ settings**. OpenRouter handles chat, camera vision, and speech;
    Stability AI handles image generation. No other provider key is used.
