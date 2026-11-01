@@ -616,6 +616,9 @@ async function generateImage(prompt, displayedRequest = prompt) {
     download.download = `aria-${Date.now()}.${extension}`;
     download.textContent = "Download";
     generation.ui.actions.append(open, download);
+    messagesBox.scrollTop = messagesBox.scrollHeight;
+    image.addEventListener("click", () => window.open(url, "_blank", "noopener"));
+    image.style.cursor = "zoom-in";
   } catch (error) {
     if (!generation.terminal) {
       generation.terminal = true;

@@ -134,6 +134,7 @@ let boundaryCount = 0;
 let emotionGain = 0, emotionTarget = 0;
 let thinking = false, listening = false;
 let microSmile = 0, nextSmile = 6;
+let prevEnergy = 0;
 
 // pointer tracking — she looks toward your cursor (big "alive" boost)
 let px = 0, py = 0, tpx = 0, tpy = 0;
@@ -582,6 +583,7 @@ new GLTFLoader()
           nameToIndex[k.replace("blendShape1.", "")] = v;
         }
       }
+      for (const n of MOUTH_NAMES) { const i = idx(n); if (i >= 0) mouthIdx.add(i); }
       baseRot.copy(faceRoot.rotation);
       basePos.copy(faceRoot.position);
       frameFace();
@@ -625,6 +627,11 @@ function frameFace() {
       const mats = Array.isArray(o.material) ? o.material : [o.material];
       for (const m of mats) {
         if ("envMapIntensity" in m) m.envMapIntensity = 1.15;
+        // soft, slightly satin skin instead of plastic shine
+        if ("roughness" in m && m.name !== "eyes" && !/eye|teeth|tongue/i.test(m.name || o.name || "")) {
+          m.roughness = Math.max(m.roughness ?? 0.6, 0.58);
+          if ("sheen" in m) { m.sheen = 0.5; m.sheenRoughness = 0.5; m.sheenColor?.set?.(0xffc9b0); }
+        }
         m.needsUpdate = true;
       }
     }
@@ -662,6 +669,11 @@ function beginBlink(isFollowUp = false) {
   blinkT = 0;
   doubleBlinkPending = isFollowUp ? false : Math.random() < 0.14;
 }
+
+const MOUTH_NAMES = ["jawOpen", "mouthFunnel", "mouthPucker", "mouthClose", "mouthStretch_L", "mouthStretch_R",
+  "mouthPress_L", "mouthPress_R", "mouthRollLower", "mouthRollUpper", "mouthLowerDown_L", "mouthLowerDown_R",
+  "mouthUpperUp_L", "mouthUpperUp_R", "tongueOut"];
+const mouthIdx = new Set();
 
 const MANAGED = [
   "eyeBlink_L", "eyeBlink_R", "browInnerUp", "browOuterUp_L", "browOuterUp_R",
@@ -786,7 +798,17 @@ function animate() {
       const est = anchorChar + (performance.now() - anchorTime) * charsPerMs;
       let vi = 0;
       for (let i = 0; i < seqG.length; i++) { if (seqG[i].start <= est) vi = i; else break; }
-      currentViseme = VISEMES[seqG[vi].v] || VISEMES.sil;
+      const cur = VISEMES[seqG[vi].v] || VISEMES.sil;
+      const nxt = seqG[vi + 1] ? (VISEMES[seqG[vi + 1].v] || VISEMES.sil) : cur;
+      const span = seqG[vi + 1] ? Math.max(0.001, seqG[vi + 1].start - seqG[vi].start) : 1;
+      // coarticulation: the lips start moving to the next sound before the
+      // current one ends, which removes the robotic "snap" between shapes.
+      const f = THREE.MathUtils.smoothstep((est - seqG[vi].start) / span, 0.45, 1) * 0.6;
+      const blended = {};
+      for (const key of new Set([...Object.keys(cur), ...Object.keys(nxt)])) {
+        blended[key] = (cur[key] || 0) * (1 - f) + (nxt[key] || 0) * f;
+      }
+      currentViseme = blended;
     }
 
     // mouth: lip-sync viseme, or procedural fallback
@@ -808,16 +830,39 @@ function animate() {
       setT("mouthFunnel", 0.1 * (0.5 + 0.5 * Math.sin(t * 8)) * mouthGain);
     }
 
-    // smooth most influences toward target (time-constant ~45ms)
-    const k = 1 - Math.exp(-dt / 0.045);
+    // vocal emphasis: a sudden energy peak lifts the brows and nods slightly,
+    // the way people punctuate stressed syllables.
+    if (cloudAudioActive && audioEnergy - prevEnergy > 0.18 && audioEnergy > 0.45 && performance.now() - lastSpeechGestureAt > 450) {
+      lastSpeechGestureAt = performance.now();
+      gestureBrow = 0.55;
+      if (Math.random() < 0.5) gestureNod = Math.min(1, gestureNod + 0.45);
+    }
+    prevEnergy = audioEnergy;
+    if (talking) setT("browInnerUp", 0.06 + audioEnergy * 0.12);
+
+    // genuine (Duchenne) smile: a real smile also lifts the cheeks and
+    // narrows the eyes, and the nose wrinkles slightly.
+    const smileNow = Math.max(0, (targets[idx("mouthSmile_L")] + targets[idx("mouthSmile_R")]) / 2) || 0;
+    setT("cheekSquint_L", smileNow * 0.6); setT("cheekSquint_R", smileNow * 0.6);
+    setT("eyeSquint_L", smileNow * 0.4); setT("eyeSquint_R", smileNow * 0.4);
+    setT("noseSneer_L", smileNow * 0.1); setT("noseSneer_R", smileNow * 0.1);
+    // a friendly resting smile while talking, softer at rest
+    if (talking) { setT("mouthSmile_L", 0.1); setT("mouthSmile_R", 0.1); }
+    else { setT("mouthSmile_L", 0.04); setT("mouthSmile_R", 0.04); }
+
+    // mouth shapes follow fast (tight lip-sync); face/brows ease slower
+    const kMouth = 1 - Math.exp(-dt / 0.026);
+    const kFace = 1 - Math.exp(-dt / 0.06);
     for (let i = 0; i < influences.length; i++) {
-      influences[i] += (targets[i] - influences[i]) * k;
+      influences[i] += (targets[i] - influences[i]) * (mouthIdx.has(i) ? kMouth : kFace);
     }
 
     // crisp blink: write directly so the 0.18s pulse is fully visible
     const bL = idx("eyeBlink_L"), bR = idx("eyeBlink_R");
-    if (bL >= 0) influences[bL] = blink * blinkProfile.left;
-    if (bR >= 0) influences[bR] = blink * blinkProfile.right;
+    // upper eyelids drop slightly when looking down (and rise when looking up)
+    const lid = Math.max(0, -gazeY) * 0.3 + (thinking ? 0.06 : 0);
+    if (bL >= 0) influences[bL] = Math.max(blink * blinkProfile.left, lid);
+    if (bR >= 0) influences[bR] = Math.max(blink * blinkProfile.right, lid);
   }
 
   // smooth pointer
