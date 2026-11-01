@@ -19,12 +19,15 @@ const DEFAULT_PERSONA =
   "You are Aria, a warm, natural and concise AI companion. " +
   "When camera frames are attached, inspect them carefully before answering. " +
   "For counting, count only clearly visible items. For colours and objects, be precise. " +
-  "If the view is unclear, say that briefly instead of guessing.";
+  "If the view is unclear, say that briefly instead of guessing. " +
+  "You are fluent in English, Kannada, Hindi, Tamil, Telugu and Malayalam. " +
+  "If the user asks to talk in one of these languages, or writes in it, answer in that language and script right away. " +
+  "Never say you can only speak English.";
 
 const LANGUAGES = {
   "en-IN": {
     label: "English (India)",
-    replyRule: "Reply in natural conversational English unless the user explicitly requests another language.",
+    replyRule: "Reply in natural conversational English, unless the user writes in another language or asks to talk in one (Kannada, Hindi, Tamil, Telugu, Malayalam) — then reply fully in that language and script.",
     listening: "Listening…",
     thinking: "Thinking…",
     speaking: "Speaking…",
@@ -152,6 +155,52 @@ function getLanguage() {
   return LANGUAGES[value] ? value : "en-IN";
 }
 function langCopy() { return LANGUAGES[getLanguage()]; }
+
+// ---- automatic language switching -------------------------------------
+const SCRIPT_LANGS = [
+  ["kn-IN", /[\u0C80-\u0CFF]/g],
+  ["hi-IN", /[\u0900-\u097F]/g],
+  ["ta-IN", /[\u0B80-\u0BFF]/g],
+  ["te-IN", /[\u0C00-\u0C7F]/g],
+  ["ml-IN", /[\u0D00-\u0D7F]/g],
+];
+const LANGUAGE_WORDS = [
+  ["kn-IN", /ka+n+a*d|kanda?da|ಕನ್ನಡ/i],
+  ["hi-IN", /hindi|हिन्दी|हिंदी/i],
+  ["ta-IN", /tamil|தமிழ்/i],
+  ["te-IN", /telugu|తెలుగు/i],
+  ["ml-IN", /malayalam|മലയാളം/i],
+  ["en-IN", /english|ಇಂಗ್ಲಿಷ್|अंग्रेज़ी|अंग्रेजी/i],
+];
+
+// Language of the text, judged by its script (null when it is Latin/unknown).
+function scriptLanguage(text) {
+  let best = null, bestCount = 0;
+  for (const [code, re] of SCRIPT_LANGS) {
+    const count = (text.match(re) || []).length;
+    if (count > bestCount) { best = code; bestCount = count; }
+  }
+  return bestCount >= 2 ? best : null;
+}
+
+// Language the user is asking for ("talk in kannada", "kannadalli maatadu"…).
+function requestedLanguage(text) {
+  const bySpeech = /(talk|speak|reply|respond|answer|chat|converse|say|maat|baat|pesu|matlad)|ಮಾತ|बोल|बात|பேச|మాట్లా|സംസാര/i.test(text);
+  for (const [code, re] of LANGUAGE_WORDS) {
+    if (re.test(text) && (bySpeech || text.trim().split(/\s+/).length <= 3)) return code;
+  }
+  return scriptLanguage(text);
+}
+
+function setLanguage(code) {
+  if (!LANGUAGES[code] || getLanguage() === code) return;
+  store.set(LANGUAGE_STORE, code);
+  if (languageSelect) languageSelect.value = code;
+  document.documentElement.lang = code;
+  window.ariaAvatar?.setLanguage?.(code);
+  populateVoices();
+  toast(`Language switched to ${LANGUAGES[code].label}`, "info", 3500);
+}
 
 // ------------------------------------------------------------------ settings
 function listBrowserVoices() {
@@ -788,7 +837,7 @@ async function fetchSarvamSpeech(text, turn, signal = turn.controller.signal) {
   }
 
   const key = getSarvamKey();
-  if (!key) throw new Error("Sarvam key is not configured");
+  if (!key) throw new Error("Sarvam voice is not set up. Stop the server, set $env:SARVAM_API_KEY (PowerShell), then run npm start again.");
   let response;
   try {
     response = await fetch("https://api.sarvam.ai/text-to-speech", {
@@ -940,6 +989,9 @@ async function runTurn(text) {
     return;
   }
 
+  const wantedLanguage = requestedLanguage(value);
+  if (wantedLanguage) setLanguage(wantedLanguage);
+
   stopRecognition(true);
   const session = callSession;
   const turn = {
@@ -961,6 +1013,8 @@ async function runTurn(text) {
 
     const reply = await askOpenRouter(value, frames, turn);
     if (turn.cancelled || turn !== activeTurn) throw new DOMException("Cancelled", "AbortError");
+    // speak in the language the reply was actually written in
+    turn.language = scriptLanguage(reply) || turn.language;
 
     let neuralSpeech = null;
     if (shouldUseNeuralSpeech(turn.language)) {
