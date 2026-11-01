@@ -600,6 +600,7 @@ new GLTFLoader()
       baseRot.copy(faceRoot.rotation);
       basePos.copy(faceRoot.position);
       frameFace();
+      enhanceFace(); // realistic eyes + hair (guarded: never breaks the avatar)
       if (loaderEl) loaderEl.remove();
       container.classList.add("ready"); // trigger CSS fade-in
       resize();
@@ -627,6 +628,233 @@ function findMorphMesh(root) {
   });
   return found;
 }
+// ================================================================ eyes
+let eyeballs = [];
+
+// Painted human eye: warm sclera, fibrous brown iris, limbal ring, pupil.
+// Equirectangular layout: the iris faces +Z at u=0.25, v=0.5 on a SphereGeometry.
+function makeEyeTexture(irisHex = "#6b4423") {
+  const W = 1024, H = 512, cx = 256, cy = 256, R = 92;
+  const c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  const g = c.getContext("2d");
+  const sclera = g.createLinearGradient(0, 0, W, 0);
+  sclera.addColorStop(0, "#e9dfd8"); sclera.addColorStop(0.25, "#f4efea"); sclera.addColorStop(0.5, "#e8dcd5"); sclera.addColorStop(1, "#e9dfd8");
+  g.fillStyle = sclera; g.fillRect(0, 0, W, H);
+  // faint blood vessels toward the corners
+  g.strokeStyle = "rgba(190,80,80,0.10)"; g.lineWidth = 1;
+  for (let i = 0; i < 40; i++) {
+    const a = Math.random() * Math.PI * 2, r0 = R * 1.5, r1 = R * (2.2 + Math.random() * 1.6);
+    g.beginPath(); g.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0 * 0.9);
+    g.quadraticCurveTo(cx + Math.cos(a + 0.2) * (r0 + r1) / 2, cy + Math.sin(a + 0.2) * (r0 + r1) / 2, cx + Math.cos(a) * r1, cy + Math.sin(a) * r1 * 0.9); g.stroke();
+  }
+  // iris base
+  const iris = g.createRadialGradient(cx, cy, R * 0.25, cx, cy, R);
+  iris.addColorStop(0, "#c58a45"); iris.addColorStop(0.45, irisHex); iris.addColorStop(1, "#24140a");
+  g.fillStyle = iris; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill();
+  // radial fibres
+  for (let i = 0; i < 260; i++) {
+    const a = Math.random() * Math.PI * 2, r0 = R * (0.28 + Math.random() * 0.1), r1 = R * (0.75 + Math.random() * 0.22);
+    g.strokeStyle = Math.random() < 0.5 ? "rgba(255,214,150,0.22)" : "rgba(20,10,4,0.30)";
+    g.lineWidth = 0.6 + Math.random() * 1.4;
+    g.beginPath(); g.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0); g.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1); g.stroke();
+  }
+  // limbal ring + pupil
+  g.strokeStyle = "rgba(10,6,4,0.75)"; g.lineWidth = 7; g.beginPath(); g.arc(cx, cy, R - 2, 0, Math.PI * 2); g.stroke();
+  g.fillStyle = "#050302"; g.beginPath(); g.arc(cx, cy, R * 0.36, 0, Math.PI * 2); g.fill();
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+function replaceEyes() {
+  faceRoot.updateMatrixWorld(true);
+  const scale = faceRoot.getWorldScale(new THREE.Vector3()).x || 1;
+  const headBox = new THREE.Box3().setFromObject(head);
+  const headSize = headBox.getSize(new THREE.Vector3());
+  const originals = [];
+  faceRoot.traverse((o) => { if (o.isMesh && o !== head && /eye/i.test(o.name || "") && !/lash|brow/i.test(o.name)) originals.push(o); });
+  // keep only leaf-most eye meshes, one per side
+  let found = originals;
+  if (found.length < 2) {
+    // fallback: small non-head meshes in the upper half of the head
+    found = [];
+    faceRoot.traverse((o) => {
+      if (!o.isMesh || o === head || /teeth|tongue|gum|hair/i.test(o.name || "")) return;
+      const b = new THREE.Box3().setFromObject(o), s = b.getSize(new THREE.Vector3()), ctr = b.getCenter(new THREE.Vector3());
+      if (Math.max(s.x, s.y, s.z) < headSize.x * 0.3 && ctr.y > headBox.min.y + headSize.y * 0.45) found.push(o);
+    });
+  }
+  if (found.length < 2) { console.warn("Aria: eye meshes not found; keeping original eyes."); return; }
+  found = found.slice(0, 2);
+
+  const map = makeEyeTexture();
+  for (const original of found) {
+    const box = new THREE.Box3().setFromObject(original);
+    const size = box.getSize(new THREE.Vector3());
+    const worldCenter = box.getCenter(new THREE.Vector3());
+    const radius = (Math.max(size.x, size.y, size.z) / 2) / scale * 0.97;
+    if (!(radius > 0)) continue;
+    const eye = new THREE.Mesh(
+      new THREE.SphereGeometry(radius, 48, 32),
+      new THREE.MeshPhysicalMaterial({
+        map, roughness: 0.18, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.03,
+        envMapIntensity: 1.6, specularIntensity: 1,
+      })
+    );
+    eye.position.copy(faceRoot.worldToLocal(worldCenter.clone()));
+    eye.renderOrder = 1;
+    faceRoot.add(eye);
+    original.visible = false;
+    eyeballs.push(eye);
+  }
+}
+
+// ================================================================ hair
+let hairGroup = null;
+const HAIR_COLORS = {
+  black: 0x1a1412, darkbrown: 0x3a2517, brown: 0x5a3822, auburn: 0x7a3a20, blonde: 0xb98d52, grey: 0x8a8a8c,
+};
+const HAIR_STYLES = {
+  short:  { front: 0.80, sides: 0.64, back: 0.46, thick: 0.014 },
+  medium: { front: 0.77, sides: 0.52, back: 0.30, thick: 0.017 },
+};
+let hairStyle = "short", hairColor = "darkbrown", hairCover = "normal";
+const HAIR_COVER = { less: 0.045, normal: 0, more: -0.05 }; // moves every hairline up (less) or down (more)
+try {
+  hairStyle = localStorage.getItem("aria.hairStyle") || "short";
+  hairColor = localStorage.getItem("aria.hairColor") || "darkbrown";
+  hairCover = localStorage.getItem("aria.hairCover") || "normal";
+} catch {}
+
+function makeStrandTexture() {
+  const W = 256, H = 512, c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  const g = c.getContext("2d");
+  g.clearRect(0, 0, W, H);
+  for (let i = 0; i < 520; i++) {
+    const x = Math.random() * W, len = 220 + Math.random() * 292, y0 = Math.random() * (H - len) - 20;
+    const shade = 120 + Math.floor(Math.random() * 135);
+    g.strokeStyle = `rgba(${shade},${shade},${shade},${0.75 + Math.random() * 0.25})`;
+    g.lineWidth = 0.7 + Math.random() * 1.6;
+    g.beginPath(); g.moveTo(x, y0);
+    g.bezierCurveTo(x + (Math.random() - 0.5) * 8, y0 + len * 0.33, x + (Math.random() - 0.5) * 10, y0 + len * 0.66, x + (Math.random() - 0.5) * 8, y0 + len);
+    g.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+function buildHair(style, colorKey, cover = "normal") {
+  const preset = HAIR_STYLES[style];
+  if (!preset) return null;
+  const geo = head.geometry;
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox, size = bb.getSize(new THREE.Vector3()), mid = bb.getCenter(new THREE.Vector3());
+  const pos = geo.attributes.position, nor = geo.attributes.normal;
+  if (!pos || !nor) return null;
+  const index = geo.index ? geo.index.array : null;
+  const triCount = index ? index.length / 3 : pos.count / 3;
+  const H = size.y, thick = preset.thick * H;
+  const lift = HAIR_COVER[cover] ?? 0;
+  const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+  // which part of the head is covered by hair
+  const covered = (x, y, z) => {
+    const t = Math.min(1, Math.max(0, (bb.max.z - z) / size.z));          // 0 = face front, 1 = back
+    const xn = (x - mid.x) / (size.x / 2);
+    const jitter = (Math.sin(x * 97.1 + z * 43.7) + Math.sin(x * 211.3 - z * 91.9)) * 0.004 * H;
+    const frontLine = bb.min.y + (preset.front + lift) * H - 0.05 * H * xn * xn;     // lower at the temples
+    const sideLine = bb.min.y + (preset.sides + lift) * H;
+    const backLine = bb.min.y + (preset.back + lift) * H;
+    let line = frontLine + (sideLine - frontLine) * smooth(0.35, 0.55, t);
+    line += (backLine - line) * smooth(0.62, 0.9, t);
+    return y > line + jitter;
+  };
+
+  const tris = [];
+  for (let i = 0; i < triCount; i++) {
+    const a = index ? index[i * 3] : i * 3, b = index ? index[i * 3 + 1] : i * 3 + 1, c = index ? index[i * 3 + 2] : i * 3 + 2;
+    const cx = (pos.getX(a) + pos.getX(b) + pos.getX(c)) / 3, cy = (pos.getY(a) + pos.getY(b) + pos.getY(c)) / 3, cz = (pos.getZ(a) + pos.getZ(b) + pos.getZ(c)) / 3;
+    if (covered(cx, cy, cz)) tris.push(a, b, c);
+  }
+  if (tris.length < 30) { console.warn("Aria: hair region empty; skipping hair."); return null; }
+
+  const layerGeometry = (offset, uSeed, uRepeat, vRepeat) => {
+    const n = tris.length, p = new Float32Array(n * 3), uv = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) {
+      const vi = tris[i];
+      const x = pos.getX(vi) + nor.getX(vi) * offset, y = pos.getY(vi) + nor.getY(vi) * offset, z = pos.getZ(vi) + nor.getZ(vi) * offset;
+      p[i * 3] = x; p[i * 3 + 1] = y; p[i * 3 + 2] = z;
+      const ang = Math.atan2(x - mid.x, z - mid.z) / (Math.PI * 2);
+      uv[i * 2] = ang * uRepeat + uSeed;                       // strands fan out around the crown
+      uv[i * 2 + 1] = ((bb.max.y - y) / H) * vRepeat;          // and run downward along v
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(p, 3));
+    g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    g.computeVertexNormals();
+    return g;
+  };
+
+  const color = new THREE.Color(HAIR_COLORS[colorKey] ?? HAIR_COLORS.darkbrown);
+  const group = new THREE.Group();
+  group.name = "ariaHair";
+
+  // opaque dark scalp layer so no skin shows through between strands
+  const scalp = new THREE.Mesh(
+    layerGeometry(thick * 0.5, 0, 1, 1),
+    new THREE.MeshStandardMaterial({ color: color.clone().multiplyScalar(0.45), roughness: 0.75, side: THREE.DoubleSide })
+  );
+  group.add(scalp);
+
+  const strand = makeStrandTexture();
+  const layers = [[1.1, 0.0, 46, 6], [1.9, 0.31, 58, 5], [2.7, 0.67, 70, 7]];
+  layers.forEach(([k, seed, ur, vr], i) => {
+    const m = new THREE.MeshStandardMaterial({
+      map: strand, color: color.clone().multiplyScalar(0.85 + i * 0.15),
+      alphaTest: 0.35, roughness: 0.42, metalness: 0.05, envMapIntensity: 0.9, side: THREE.DoubleSide,
+    });
+    const layer = new THREE.Mesh(layerGeometry(thick * k, seed, ur, vr), m);
+    layer.renderOrder = 2 + i;
+    group.add(layer);
+  });
+  return group;
+}
+
+function setHair(style, colorKey, cover = hairCover) {
+  if (!head) return;
+  if (hairGroup) {
+    head.remove(hairGroup);
+    hairGroup.traverse((o) => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
+    hairGroup = null;
+  }
+  hairStyle = style; hairColor = colorKey; hairCover = cover;
+  try {
+    localStorage.setItem("aria.hairStyle", style);
+    localStorage.setItem("aria.hairColor", colorKey);
+    localStorage.setItem("aria.hairCover", cover);
+  } catch {}
+  if (style === "none") return;
+  try {
+    hairGroup = buildHair(style, colorKey, cover);
+    if (hairGroup) head.add(hairGroup);
+  } catch (error) {
+    console.warn("Aria: hair could not be built", error);
+    hairGroup = null;
+  }
+}
+
+function enhanceFace() {
+  if (!faceRoot || !head) return;
+  try { replaceEyes(); } catch (error) { console.warn("Aria: eye upgrade skipped", error); }
+  try { setHair(hairStyle, hairColor, hairCover); } catch (error) { console.warn("Aria: hair skipped", error); }
+}
+
 function makePoreTexture() {
   const size = 512, c = document.createElement("canvas");
   c.width = c.height = size;
@@ -665,7 +893,7 @@ function frameFace() {
       for (const m of mats) {
         if ("envMapIntensity" in m) m.envMapIntensity = 1.15;
         // soft, slightly satin skin instead of plastic shine
-        if ("roughness" in m && m.name !== "eyes" && !/eye|teeth|tongue/i.test(m.name || o.name || "")) {
+        if ("roughness" in m && o === head) {
           m.roughness = Math.max(m.roughness ?? 0.6, 0.62);
           if ("bumpMap" in m && o === head) {
             // fine pore/skin micro-detail removes the smooth plastic "doll" look
@@ -695,8 +923,8 @@ resize();
 function applyGaze() {
   if (gazeX > 0) { setTExact("eyeLookOut_L", gazeX * 0.6); setTExact("eyeLookIn_R", gazeX * 0.6); }
   else { setTExact("eyeLookIn_L", -gazeX * 0.6); setTExact("eyeLookOut_R", -gazeX * 0.6); }
-  if (gazeY > 0) { setTExact("eyeLookUp_L", gazeY * 0.5); setTExact("eyeLookUp_R", gazeY * 0.5); }
-  else { setTExact("eyeLookDown_L", -gazeY * 0.5); setTExact("eyeLookDown_R", -gazeY * 0.5); }
+  if (gazeY > 0) { setTExact("eyeLookDown_L", gazeY * 0.5); setTExact("eyeLookDown_R", gazeY * 0.5); }
+  else { setTExact("eyeLookUp_L", -gazeY * 0.5); setTExact("eyeLookUp_R", -gazeY * 0.5); }
 }
 
 function beginBlink(isFollowUp = false) {
@@ -817,6 +1045,10 @@ function animate() {
     gazeX += (gazeTX - gazeX) * Math.min(1, dt * 10);
     gazeY += (gazeTY - gazeY) * Math.min(1, dt * 10);
     applyGaze();
+    for (const eye of eyeballs) {
+      eye.rotation.y = THREE.MathUtils.clamp(gazeX, -1, 1) * 0.34;
+      eye.rotation.x = THREE.MathUtils.clamp(gazeY, -1, 1) * 0.26;
+    }
 
     // Real neural-audio amplitude drives jaw/lip strength. This closes the
     // mouth during actual pauses and opens it on voiced syllables.
@@ -901,7 +1133,7 @@ function animate() {
     // crisp blink: write directly so the 0.18s pulse is fully visible
     const bL = idx("eyeBlink_L"), bR = idx("eyeBlink_R");
     // upper eyelids drop slightly when looking down (and rise when looking up)
-    const lid = Math.max(0, -gazeY) * 0.3 + (thinking ? 0.06 : 0);
+    const lid = Math.max(0, gazeY) * 0.3 + (thinking ? 0.06 : 0);
     if (bL >= 0) influences[bL] = Math.max(blink * blinkProfile.left, lid);
     if (bR >= 0) influences[bR] = Math.max(blink * blinkProfile.right, lid);
   }
@@ -963,6 +1195,7 @@ window.ariaAvatar = {
   stopTalking() { cancelSpeak(); },
   setVoice(on) { voiceOn = !!on; if (!on) cancelSpeak(); },
   setLanguage(language) { preferredLanguage = language || "en-IN"; },
+  setHair(style, color, cover) { setHair(style, color, cover); },
   setPhase(next) {
     thinking = next === "thinking";
     listening = next === "listening";
