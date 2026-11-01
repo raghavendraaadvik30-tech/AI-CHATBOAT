@@ -707,15 +707,220 @@ function replaceEyes() {
     );
     eye.position.copy(faceRoot.worldToLocal(worldCenter.clone()));
     eye.renderOrder = 1;
+    eye.userData.radius = radius;
     faceRoot.add(eye);
     original.visible = false;
     eyeballs.push(eye);
   }
 }
 
+// ================================================================ eyebrows & eyelashes
+// Ribbons of painted strands that are glued to the skin: every frame each ribbon
+// vertex follows its nearest head vertex through the active morph targets, so the
+// brows lift / frown and the lashes close together with the eyelids.
+const faceDetails = { group: null, strips: [], brows: true, lashes: true };
+try {
+  faceDetails.brows = localStorage.getItem("aria.brows") !== "off";
+  faceDetails.lashes = localStorage.getItem("aria.lashes") !== "off";
+} catch {}
+
+function makeBrowTexture() {
+  const W = 512, H = 128, c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  const g = c.getContext("2d");
+  g.clearRect(0, 0, W, H);
+  for (let i = 0; i < 1500; i++) {
+    const u = Math.random(), x = u * W;
+    // hairs grow up-and-out near the nose, flatter toward the tail
+    const lean = (1 - u) * 0.9 + 0.1, y = H * (0.18 + Math.random() * 0.64);
+    const len = 20 + Math.random() * 20;
+    const shade = 18 + Math.floor(Math.random() * 34);
+    g.strokeStyle = `rgba(${shade + 12},${shade + 4},${shade},${0.55 + Math.random() * 0.45})`;
+    g.lineWidth = 1.3 + Math.random() * 1.5;
+    g.beginPath(); g.moveTo(x, y);
+    g.quadraticCurveTo(x + len * 0.5, y - len * lean * 0.45, x + len, y - len * lean * 0.7);
+    g.stroke();
+  }
+  // soft shaped edge: dense in the middle of the band, fading at top/bottom and at the tail
+  g.globalCompositeOperation = "destination-in";
+  const v = g.createLinearGradient(0, 0, 0, H);
+  v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(0.28, "rgba(0,0,0,1)"); v.addColorStop(0.72, "rgba(0,0,0,1)"); v.addColorStop(1, "rgba(0,0,0,0)");
+  g.fillStyle = v; g.fillRect(0, 0, W, H);
+  const h = g.createLinearGradient(0, 0, W, 0);
+  h.addColorStop(0, "rgba(0,0,0,0.85)"); h.addColorStop(0.12, "rgba(0,0,0,1)"); h.addColorStop(0.7, "rgba(0,0,0,0.95)"); h.addColorStop(1, "rgba(0,0,0,0)");
+  g.fillStyle = h; g.fillRect(0, 0, W, H);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+function makeLashTexture() {
+  const W = 512, H = 64, c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  const g = c.getContext("2d");
+  g.clearRect(0, 0, W, H);
+  for (let i = 0; i < 150; i++) {
+    const u = Math.random(), x = u * W, len = H * (0.55 + Math.random() * 0.45);
+    g.strokeStyle = `rgba(10,7,6,${0.7 + Math.random() * 0.3})`;
+    g.lineWidth = 1.2 + Math.random() * 1.4;
+    g.beginPath(); g.moveTo(x, H);
+    g.quadraticCurveTo(x + 4 + u * 10, H - len * 0.6, x + 8 + u * 22, H - len); // lashes curl toward the outer corner
+    g.stroke();
+  }
+  g.fillStyle = "rgba(8,6,5,0.9)"; g.fillRect(0, H - 4, W, 4); // lash line
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function buildFaceDetails() {
+  if (!head || eyeballs.length < 2) return null;
+  const geo = head.geometry;
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox, size = bb.getSize(new THREE.Vector3());
+  const pos = geo.attributes.position, nor = geo.attributes.normal;
+  if (!pos || !nor) return null;
+
+  faceRoot.updateMatrixWorld(true);
+  const fScale = faceRoot.getWorldScale(new THREE.Vector3()).x || 1;
+  const hScale = head.getWorldScale(new THREE.Vector3()).x || 1;
+  const toHead = (p) => head.worldToLocal(faceRoot.localToWorld(p.clone()));
+  const eyes = eyeballs.map((e) => ({ c: toHead(e.position), r: (e.userData.radius || 0.05) * fScale / hScale }));
+  const midX = (eyes[0].c.x + eyes[1].c.x) / 2;
+
+  // vertices on the front of the face, candidates for gluing ribbons to
+  const front = [];
+  for (let i = 0; i < pos.count; i++) if (nor.getZ(i) > 0.2 && pos.getZ(i) > bb.min.z + size.z * 0.4) front.push(i);
+  if (front.length < 20) return null;
+  const snap = (x, y) => {
+    let best = front[0], bd = Infinity;
+    for (const i of front) { const dx = pos.getX(i) - x, dy = pos.getY(i) - y, d = dx * dx + dy * dy; if (d < bd) { bd = d; best = i; } }
+    return { vi: best, dx: x - pos.getX(best), dy: y - pos.getY(best) };
+  };
+
+  const group = new THREE.Group();
+  group.name = "ariaFaceDetails";
+  const strips = [];
+
+  // samples: [{x, yBot, yTop, liftBot, liftTop}] ordered along the ribbon
+  const addStrip = (samples, texture, color, order) => {
+    const K = samples.length, p = new Float32Array(K * 2 * 3), uv = new Float32Array(K * 2 * 2), idx = [];
+    const vi = new Uint32Array(K * 2), off = new Float32Array(K * 2 * 3);
+    samples.forEach((s, i) => {
+      [[s.yBot, s.liftBot, 0], [s.yTop, s.liftTop, 1]].forEach(([y, lift, row]) => {
+        const j = i * 2 + row, sn = snap(s.x, y);
+        vi[j] = sn.vi;
+        off[j * 3] = sn.dx + nor.getX(sn.vi) * lift;
+        off[j * 3 + 1] = sn.dy + nor.getY(sn.vi) * lift;
+        off[j * 3 + 2] = nor.getZ(sn.vi) * lift;
+        p[j * 3] = pos.getX(sn.vi) + off[j * 3]; p[j * 3 + 1] = pos.getY(sn.vi) + off[j * 3 + 1]; p[j * 3 + 2] = pos.getZ(sn.vi) + off[j * 3 + 2];
+        uv[j * 2] = i / (K - 1); uv[j * 2 + 1] = row;
+      });
+      if (i < K - 1) { const a = i * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+    });
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(p, 3));
+    g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
+      map: texture, color, transparent: true, alphaTest: 0.04, depthWrite: false, roughness: 0.55,
+      side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    }));
+    mesh.frustumCulled = false;
+    mesh.renderOrder = order;
+    group.add(mesh);
+    strips.push({ mesh, vi, off });
+  };
+
+  const N = 28;
+  if (faceDetails.brows) {
+    const tex = makeBrowTexture();
+    for (const { c, r } of eyes) {
+      const inward = Math.sign(midX - c.x) || 1;
+      const samples = [];
+      for (let i = 0; i < N; i++) {
+        const t = i / (N - 1);
+        const x = c.x + inward * r * (1.3 - 3.3 * t);                       // inner end → tail
+        const arch = t < 0.62 ? 0.5 * Math.sin((t / 0.62) * Math.PI / 2) : 0.5 - 0.95 * Math.pow((t - 0.62) / 0.38, 1.4);
+        const mid = c.y + r * (2.0 + arch);
+        const half = r * (0.34 * Math.pow(1 - t, 0.7) + 0.05);
+        samples.push({ x, yBot: mid - half, yTop: mid + half, liftBot: r * 0.03, liftTop: r * 0.05 });
+      }
+      addStrip(samples, tex, 0xffffff, 6);
+    }
+  }
+  if (faceDetails.lashes) {
+    const tex = makeLashTexture();
+    for (const { c, r } of eyes) {
+      const inward = Math.sign(midX - c.x) || 1;
+      const samples = [];
+      for (let i = 0; i < N; i++) {
+        const t = i / (N - 1), s = 2 * t - 1;
+        const x = c.x + inward * r * (1.05 - 2.1 * t);                      // inner corner → outer corner
+        const yBot = c.y + r * (0.45 * (1 - s * s) - 0.03);
+        const len = r * (0.12 + 0.2 * t);                                   // longer toward the outer corner
+        samples.push({ x, yBot, yTop: yBot + len, liftBot: r * 0.05, liftTop: r * 0.2 });
+      }
+      addStrip(samples, tex, 0xffffff, 7);
+    }
+  }
+  if (!strips.length) return null;
+  faceDetails.group = group;
+  faceDetails.strips = strips;
+  return group;
+}
+
+function updateFaceDetails() {
+  if (!faceDetails.group || !influences) return;
+  const geo = head.geometry, morphs = geo.morphAttributes && geo.morphAttributes.position;
+  const pos = geo.attributes.position, relative = !!geo.morphTargetsRelative;
+  const active = [];
+  if (morphs) for (let k = 0; k < influences.length; k++) if (Math.abs(influences[k]) > 0.002 && morphs[k]) active.push(k);
+  for (const s of faceDetails.strips) {
+    const attr = s.mesh.geometry.attributes.position, arr = attr.array;
+    for (let j = 0; j < s.vi.length; j++) {
+      const vi = s.vi[j];
+      let x = pos.getX(vi), y = pos.getY(vi), z = pos.getZ(vi);
+      const bx = x, by = y, bz = z;
+      for (const k of active) {
+        const m = morphs[k], w = influences[k];
+        x += w * (m.getX(vi) - (relative ? 0 : bx));
+        y += w * (m.getY(vi) - (relative ? 0 : by));
+        z += w * (m.getZ(vi) - (relative ? 0 : bz));
+      }
+      arr[j * 3] = x + s.off[j * 3]; arr[j * 3 + 1] = y + s.off[j * 3 + 1]; arr[j * 3 + 2] = z + s.off[j * 3 + 2];
+    }
+    attr.needsUpdate = true;
+  }
+}
+
+function setFaceDetails(browsOn, lashesOn) {
+  if (!head) return;
+  faceDetails.brows = !!browsOn; faceDetails.lashes = !!lashesOn;
+  try {
+    localStorage.setItem("aria.brows", browsOn ? "on" : "off");
+    localStorage.setItem("aria.lashes", lashesOn ? "on" : "off");
+  } catch {}
+  if (faceDetails.group) {
+    head.remove(faceDetails.group);
+    faceDetails.group.traverse((o) => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
+    faceDetails.group = null; faceDetails.strips = [];
+  }
+  if (!faceDetails.brows && !faceDetails.lashes) return;
+  try {
+    const group = buildFaceDetails();
+    if (group) { head.add(group); updateFaceDetails(); }
+  } catch (error) {
+    console.warn("Aria: brows/lashes could not be built", error);
+    faceDetails.group = null; faceDetails.strips = [];
+  }
+}
+
 function enhanceFace() {
   if (!faceRoot || !head) return;
   try { replaceEyes(); } catch (error) { console.warn("Aria: eye upgrade skipped", error); }
+  try { setFaceDetails(faceDetails.brows, faceDetails.lashes); } catch (error) { console.warn("Aria: face details skipped", error); }
 }
 
 function makePoreTexture() {
@@ -988,6 +1193,10 @@ function animate() {
     if (talking) { setT("mouthSmile_L", 0.1); setT("mouthSmile_R", 0.1); }
     else { setT("mouthSmile_L", 0.04); setT("mouthSmile_R", 0.04); }
 
+    // quiet breathing: tiny nostril flare on a ~5s cycle
+    const breath = 0.5 + 0.5 * Math.sin(t * 1.25);
+    setT("noseSneer_L", 0.035 * breath); setT("noseSneer_R", 0.03 * breath);
+
     // mouth shapes follow fast (tight lip-sync); face/brows ease slower
     const kMouth = 1 - Math.exp(-dt / 0.026);
     const kFace = 1 - Math.exp(-dt / 0.06);
@@ -997,6 +1206,11 @@ function animate() {
 
     // crisp blink: write directly so the 0.18s pulse is fully visible
     const bL = idx("eyeBlink_L"), bR = idx("eyeBlink_R");
+    // warm blush when smiling or emotionally engaged
+    if (head.material && !Array.isArray(head.material) && head.material.color) {
+      const b = THREE.MathUtils.clamp(smileNow * 1.4 + emotionGain * 0.25, 0, 1);
+      head.material.color.setRGB(1, 1 - 0.045 * b, 1 - 0.075 * b);
+    }
     // closing eyes also lift the lower lid / cheeks a touch
     if (blink > 0.05) {
       const cL = idx("cheekSquint_L"), cR = idx("cheekSquint_R");
@@ -1007,6 +1221,9 @@ function animate() {
     const lid = Math.max(0, gazeY) * 0.3 + (thinking ? 0.06 : 0);
     if (bL >= 0) influences[bL] = Math.max(blink * blinkProfile.left, lid);
     if (bR >= 0) influences[bR] = Math.max(blink * blinkProfile.right, lid);
+
+    // brows and lashes ride on the morphed skin, so run after every influence is final
+    updateFaceDetails();
   }
 
   // smooth pointer
@@ -1066,6 +1283,7 @@ window.ariaAvatar = {
   stopTalking() { cancelSpeak(); },
   setVoice(on) { voiceOn = !!on; if (!on) cancelSpeak(); },
   setLanguage(language) { preferredLanguage = language || "en-IN"; },
+  setFaceDetails(brows, lashes) { setFaceDetails(brows, lashes); },
   setPhase(next) {
     thinking = next === "thinking";
     listening = next === "listening";

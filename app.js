@@ -88,6 +88,8 @@ const modal = el("modal");
 const apiKeyInput = el("apiKey");
 const sarvamApiKeyInput = el("sarvamApiKey");
 const avatarModelInput = el("avatarModel");
+const browsSelect = el("browsSelect");
+const lashesSelect = el("lashesSelect");
 const modelInput = el("model");
 const personaInput = el("persona");
 const voiceSelect = el("voiceSelect");
@@ -261,6 +263,8 @@ function loadSettings() {
   ttsModelInput.value = getTtsModel();
   imageAspectSelect.value = getImageAspect();
   avatarModelInput.value = store.get(AVATAR_MODEL_STORE) || "";
+  browsSelect.value = store.get("aria.brows") === "off" ? "off" : "on";
+  lashesSelect.value = store.get("aria.lashes") === "off" ? "off" : "on";
   populateVoices();
 }
 
@@ -304,6 +308,7 @@ saveBtn.addEventListener("click", () => {
   store.set(TTS_MODE_STORE, ["auto", "browser", "openrouter", "sarvam"].includes(ttsModeSelect.value) ? ttsModeSelect.value : "auto");
   store.set(TTS_MODEL_STORE, ttsModelInput.value.trim() || DEFAULT_TTS_MODEL);
   store.set(IMAGE_ASPECT_STORE, imageAspectSelect.value || "1:1");
+  window.ariaAvatar?.setFaceDetails?.(browsSelect.value !== "off", lashesSelect.value !== "off");
   const modelUrl = avatarModelInput.value.trim();
   if (!modelUrl || /^https:\/\/|^\.?\.?\//.test(modelUrl)) store.set(AVATAR_MODEL_STORE, modelUrl);
   else toast("Avatar model URL must start with https:// — it was not saved.", "error", 6000);
