@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <meta name="theme-color" content="#0d0b1f" />
-  <link rel="stylesheet" href="style.css?v=31" />
+  <link rel="stylesheet" href="style.css?v=32" />
 
   <!-- Three.js via import map (jsDelivr: reliable CORS + binary assets) -->
   <script type="importmap">
@@ -208,9 +208,15 @@
         <small>Advanced: a .glb with ARKit face blendshapes (e.g. a MetaHuman, Avaturn or Reallusion export) for a more photoreal face. Leave empty for the built-in face. Reload the page after saving.</small>
       </label>
       <label class="field">
-        <span>Eyebrows</span>
-        <select id="browsSelect"><option value="on">On</option><option value="off">Off</option></select>
-        <small>Brows move with her expressions. Turn off if they look misplaced.</small>
+        <span>Skin tone</span>
+        <select id="skinToneSelect">
+          <option value="fair">Fair</option>
+          <option value="light">Light</option>
+          <option value="wheatish">Wheatish</option>
+          <option value="medium">Medium</option>
+          <option value="brown">Brown</option>
+          <option value="dark">Dark</option>
+        </select>
       </label>
       <h3 class="modal-section">5 · Personality</h3>
       <label class="field">
@@ -228,7 +234,7 @@
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
   <!-- 3D avatar engine, followed by app coordinator -->
-  <script type="module" src="avatar3d.js?v=31"></script>
-  <script type="module" src="app.js?v=31"></script>
+  <script type="module" src="avatar3d.js?v=32"></script>
+  <script type="module" src="app.js?v=32"></script>
 </body>
 </html>

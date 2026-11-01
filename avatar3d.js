@@ -140,7 +140,6 @@ let emotionGain = 0, emotionTarget = 0;
 let thinking = false, listening = false;
 let microSmile = 0, nextSmile = 6;
 let prevEnergy = 0;
-let microT = 0, microX = 0, microY = 0, pupilScale = 1;
 let vibe = 0, lastVibeWritten = -1;
 const RIM_IDLE = new THREE.Color(0xeaf1ff);
 const RIM_SPEAK = new THREE.Color(0x9ff6ff);
@@ -607,7 +606,6 @@ new GLTFLoader()
       if (loaderEl) loaderEl.remove();
       container.classList.add("ready"); // trigger CSS fade-in
       resize();
-      try { enhanceFace(); } catch (error) { reportAvatarError("eyes/brows", error); }
     },
     (ev) => { if (ev.total) setLoader(`Loading Aria… ${Math.round((ev.loaded / ev.total) * 100)}%`); },
     (err) => {
@@ -633,304 +631,20 @@ function findMorphMesh(root) {
   });
   return found;
 }
-// ================================================================ eyes
-let eyeballs = [];
-
-// Painted human eye: warm sclera, fibrous brown iris, limbal ring, pupil.
-// Equirectangular layout: the iris faces +Z at u=0.25, v=0.5 on a SphereGeometry.
-function makeEyeTexture(irisHex = "#7a4a26") {
-  const W = 1024, H = 512, cx = 256, cy = 256, R = 92;
-  const c = document.createElement("canvas");
-  c.width = W; c.height = H;
-  const g = c.getContext("2d");
-  const sclera = g.createLinearGradient(0, 0, W, 0);
-  sclera.addColorStop(0, "#e9dfd8"); sclera.addColorStop(0.25, "#f4efea"); sclera.addColorStop(0.5, "#e8dcd5"); sclera.addColorStop(1, "#e9dfd8");
-  g.fillStyle = sclera; g.fillRect(0, 0, W, H);
-  // faint blood vessels toward the corners
-  g.strokeStyle = "rgba(190,80,80,0.10)"; g.lineWidth = 1;
-  for (let i = 0; i < 40; i++) {
-    const a = Math.random() * Math.PI * 2, r0 = R * 1.5, r1 = R * (2.2 + Math.random() * 1.6);
-    g.beginPath(); g.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0 * 0.9);
-    g.quadraticCurveTo(cx + Math.cos(a + 0.2) * (r0 + r1) / 2, cy + Math.sin(a + 0.2) * (r0 + r1) / 2, cx + Math.cos(a) * r1, cy + Math.sin(a) * r1 * 0.9); g.stroke();
-  }
-  // iris base
-  const iris = g.createRadialGradient(cx, cy, R * 0.25, cx, cy, R);
-  iris.addColorStop(0, "#c58a45"); iris.addColorStop(0.45, irisHex); iris.addColorStop(1, "#24140a");
-  g.fillStyle = iris; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill();
-  // radial fibres
-  for (let i = 0; i < 260; i++) {
-    const a = Math.random() * Math.PI * 2, r0 = R * (0.28 + Math.random() * 0.1), r1 = R * (0.75 + Math.random() * 0.22);
-    g.strokeStyle = Math.random() < 0.5 ? "rgba(255,214,150,0.22)" : "rgba(20,10,4,0.30)";
-    g.lineWidth = 0.6 + Math.random() * 1.4;
-    g.beginPath(); g.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0); g.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1); g.stroke();
-  }
-  // warm golden-hazel ring around the pupil (gives depth and warmth)
-  const collar = g.createRadialGradient(cx, cy, R * 0.3, cx, cy, R * 0.62);
-  collar.addColorStop(0, "rgba(214,160,80,0.55)"); collar.addColorStop(1, "rgba(214,160,80,0)");
-  g.fillStyle = collar; g.beginPath(); g.arc(cx, cy, R * 0.62, 0, Math.PI * 2); g.fill();
-  // soft limbal ring (dark but feathered, like a real iris edge)
-  const limbal = g.createRadialGradient(cx, cy, R * 0.82, cx, cy, R * 1.04);
-  limbal.addColorStop(0, "rgba(12,7,4,0)"); limbal.addColorStop(0.6, "rgba(12,7,4,0.8)"); limbal.addColorStop(1, "rgba(12,7,4,0)");
-  g.fillStyle = limbal; g.beginPath(); g.arc(cx, cy, R * 1.04, 0, Math.PI * 2); g.fill();
-  // pupil with a slightly soft edge
-  const pupil = g.createRadialGradient(cx, cy, R * 0.3, cx, cy, R * 0.38);
-  pupil.addColorStop(0, "#040201"); pupil.addColorStop(1, "rgba(4,2,1,0)");
-  g.fillStyle = "#040201"; g.beginPath(); g.arc(cx, cy, R * 0.3, 0, Math.PI * 2); g.fill();
-  g.fillStyle = pupil; g.beginPath(); g.arc(cx, cy, R * 0.38, 0, Math.PI * 2); g.fill();
-  // gentle shadow from the upper lid onto the top of the eyeball
-  const lidShade = g.createLinearGradient(0, cy - R * 1.9, 0, cy - R * 0.2);
-  lidShade.addColorStop(0, "rgba(60,40,35,0.45)"); lidShade.addColorStop(1, "rgba(60,40,35,0)");
-  g.fillStyle = lidShade; g.fillRect(0, 0, W, cy - R * 0.2);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
-  return tex;
-}
-
-function replaceEyes() {
-  faceRoot.updateMatrixWorld(true);
-  const scale = faceRoot.getWorldScale(new THREE.Vector3()).x || 1;
-  const headBox = new THREE.Box3().setFromObject(head);
-  const headSize = headBox.getSize(new THREE.Vector3());
-  const originals = [];
-  faceRoot.traverse((o) => { if (o.isMesh && o !== head && /eye/i.test(o.name || "") && !/lash|brow/i.test(o.name)) originals.push(o); });
-  // keep only leaf-most eye meshes, one per side
-  let found = originals;
-  if (found.length < 2) {
-    // fallback: small non-head meshes in the upper half of the head
-    found = [];
-    faceRoot.traverse((o) => {
-      if (!o.isMesh || o === head || /teeth|tongue|gum/i.test(o.name || "")) return;
-      const b = new THREE.Box3().setFromObject(o), s = b.getSize(new THREE.Vector3()), ctr = b.getCenter(new THREE.Vector3());
-      if (Math.max(s.x, s.y, s.z) < headSize.x * 0.3 && ctr.y > headBox.min.y + headSize.y * 0.45) found.push(o);
-    });
-  }
-  if (found.length < 2) { console.warn("Aria: eye meshes not found; keeping original eyes."); return; }
-  found = found.slice(0, 2);
-
-  const map = makeEyeTexture();
-  for (const original of found) {
-    const box = new THREE.Box3().setFromObject(original);
-    const size = box.getSize(new THREE.Vector3());
-    const worldCenter = box.getCenter(new THREE.Vector3());
-    const radius = (Math.max(size.x, size.y, size.z) / 2) / scale * 0.94;
-    if (!(radius > 0)) continue;
-    const eye = new THREE.Mesh(
-      new THREE.SphereGeometry(radius, 48, 32),
-      new THREE.MeshPhysicalMaterial({
-        map, roughness: 0.18, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.03,
-        envMapIntensity: 1.6, specularIntensity: 1,
-      })
-    );
-    eye.position.copy(faceRoot.worldToLocal(worldCenter.clone()));
-    eye.renderOrder = 1;
-    eye.userData.radius = radius;
-    // tiny bright catchlight: the single biggest cue that an eye is alive
-    const glint = new THREE.Mesh(
-      new THREE.SphereGeometry(radius * 0.085, 12, 8),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.92, depthWrite: false })
-    );
-    glint.position.set(radius * 0.32, radius * 0.36, radius * 0.93);
-    glint.renderOrder = 3;
-    eye.add(glint);
-    eye.userData.glint = glint;
-    faceRoot.add(eye);
-    original.visible = false;
-    eyeballs.push(eye);
-  }
-}
-
-// ================================================================ eyebrows
-// Ribbons of painted hairs glued to the skin: every frame each ribbon vertex
-// follows its nearest head vertex through the active morph targets, so the
-// brows lift and frown together with her expressions.
-const faceDetails = { group: null, strips: [], brows: true };
-try {
-  faceDetails.brows = localStorage.getItem("aria.brows") !== "off";
-  localStorage.removeItem("aria.lashes");
-} catch {}
-
-function makeBrowTexture() {
-  const W = 512, H = 128, c = document.createElement("canvas");
-  c.width = W; c.height = H;
-  const g = c.getContext("2d");
-  g.clearRect(0, 0, W, H);
-  for (let i = 0; i < 1500; i++) {
-    const u = Math.random(), x = u * W;
-    // hairs grow up-and-out near the nose, flatter toward the tail
-    const lean = (1 - u) * 0.9 + 0.1, y = H * (0.18 + Math.random() * 0.64);
-    const len = 20 + Math.random() * 20;
-    const shade = 18 + Math.floor(Math.random() * 34);
-    g.strokeStyle = `rgba(${shade + 12},${shade + 4},${shade},${0.55 + Math.random() * 0.45})`;
-    g.lineWidth = 1.3 + Math.random() * 1.5;
-    g.beginPath(); g.moveTo(x, y);
-    g.quadraticCurveTo(x + len * 0.5, y - len * lean * 0.45, x + len, y - len * lean * 0.7);
-    g.stroke();
-  }
-  // soft shaped edge: dense in the middle of the band, fading at top/bottom and at the tail
-  g.globalCompositeOperation = "destination-in";
-  const v = g.createLinearGradient(0, 0, 0, H);
-  v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(0.28, "rgba(0,0,0,1)"); v.addColorStop(0.72, "rgba(0,0,0,1)"); v.addColorStop(1, "rgba(0,0,0,0)");
-  g.fillStyle = v; g.fillRect(0, 0, W, H);
-  const h = g.createLinearGradient(0, 0, W, 0);
-  h.addColorStop(0, "rgba(0,0,0,0.85)"); h.addColorStop(0.12, "rgba(0,0,0,1)"); h.addColorStop(0.7, "rgba(0,0,0,0.95)"); h.addColorStop(1, "rgba(0,0,0,0)");
-  g.fillStyle = h; g.fillRect(0, 0, W, H);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
-  return tex;
-}
-
-function buildFaceDetails() {
-  if (!head || eyeballs.length < 2) return null;
-  const geo = head.geometry;
-  geo.computeBoundingBox();
-  const bb = geo.boundingBox, size = bb.getSize(new THREE.Vector3());
-  const pos = geo.attributes.position, nor = geo.attributes.normal;
-  if (!pos || !nor) return null;
-
-  faceRoot.updateMatrixWorld(true);
-  const fScale = faceRoot.getWorldScale(new THREE.Vector3()).x || 1;
-  const hScale = head.getWorldScale(new THREE.Vector3()).x || 1;
-  const toHead = (p) => head.worldToLocal(faceRoot.localToWorld(p.clone()));
-  const eyes = eyeballs.map((e) => ({ c: toHead(e.position), r: (e.userData.radius || 0.05) * fScale / hScale }));
-  const midX = (eyes[0].c.x + eyes[1].c.x) / 2;
-
-  // vertices on the front of the face, candidates for gluing ribbons to
-  const front = [];
-  for (let i = 0; i < pos.count; i++) if (nor.getZ(i) > 0.2 && pos.getZ(i) > bb.min.z + size.z * 0.4) front.push(i);
-  if (front.length < 20) return null;
-  const snap = (x, y) => {
-    let best = front[0], bd = Infinity;
-    for (const i of front) { const dx = pos.getX(i) - x, dy = pos.getY(i) - y, d = dx * dx + dy * dy; if (d < bd) { bd = d; best = i; } }
-    return { vi: best, dx: x - pos.getX(best), dy: y - pos.getY(best) };
-  };
-
-  const group = new THREE.Group();
-  group.name = "ariaFaceDetails";
-  const strips = [];
-
-  // samples: [{x, yBot, yTop, liftBot, liftTop}] ordered along the ribbon
-  const addStrip = (samples, texture, color, order) => {
-    const K = samples.length, p = new Float32Array(K * 2 * 3), uv = new Float32Array(K * 2 * 2), nrm = new Float32Array(K * 2 * 3), idx = [];
-    const vi = new Uint32Array(K * 2), off = new Float32Array(K * 2 * 3);
-    samples.forEach((s, i) => {
-      [[s.yBot, s.liftBot, 0], [s.yTop, s.liftTop, 1]].forEach(([y, lift, row]) => {
-        const j = i * 2 + row, sn = snap(s.x, y);
-        vi[j] = sn.vi;
-        off[j * 3] = sn.dx + nor.getX(sn.vi) * lift;
-        off[j * 3 + 1] = sn.dy + nor.getY(sn.vi) * lift;
-        off[j * 3 + 2] = nor.getZ(sn.vi) * lift;
-        p[j * 3] = pos.getX(sn.vi) + off[j * 3]; p[j * 3 + 1] = pos.getY(sn.vi) + off[j * 3 + 1]; p[j * 3 + 2] = pos.getZ(sn.vi) + off[j * 3 + 2];
-        uv[j * 2] = i / (K - 1); uv[j * 2 + 1] = row;
-        // unit normal taken from the skin underneath (never zero, so lighting stays finite)
-        let nx = nor.getX(sn.vi), ny = nor.getY(sn.vi), nz = nor.getZ(sn.vi);
-        const len = Math.hypot(nx, ny, nz);
-        if (!(len > 1e-6)) { nx = 0; ny = 0; nz = 1; } else { nx /= len; ny /= len; nz /= len; }
-        nrm[j * 3] = nx; nrm[j * 3 + 1] = ny; nrm[j * 3 + 2] = nz;
-      });
-      if (i < K - 1) { const a = i * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
-    });
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.BufferAttribute(p, 3));
-    g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
-    g.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
-    g.setIndex(idx);
-    const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
-      map: texture, color, transparent: true, alphaTest: 0.04, depthWrite: false, roughness: 0.55,
-      side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
-    }));
-    mesh.frustumCulled = false;
-    mesh.renderOrder = order;
-    group.add(mesh);
-    strips.push({ mesh, vi, off });
-  };
-
-  const N = 28;
-  if (faceDetails.brows) {
-    const tex = makeBrowTexture();
-    for (const { c, r } of eyes) {
-      const inward = Math.sign(midX - c.x) || 1;
-      const samples = [];
-      for (let i = 0; i < N; i++) {
-        const t = i / (N - 1);
-        const x = c.x + inward * r * (1.3 - 3.3 * t);                       // inner end → tail
-        const arch = t < 0.62 ? 0.5 * Math.sin((t / 0.62) * Math.PI / 2) : 0.5 - 0.95 * Math.pow((t - 0.62) / 0.38, 1.4);
-        const mid = c.y + r * (2.0 + arch);
-        const half = r * (0.34 * Math.pow(1 - t, 0.7) + 0.05);
-        samples.push({ x, yBot: mid - half, yTop: mid + half, liftBot: r * 0.03, liftTop: r * 0.05 });
-      }
-      addStrip(samples, tex, 0xffffff, 6);
-    }
-  }
-  if (!strips.length) return null;
-  faceDetails.group = group;
-  faceDetails.strips = strips;
-  return group;
-}
-
-function updateFaceDetails() {
-  if (!faceDetails.group || !influences) return;
-  const geo = head.geometry, morphs = geo.morphAttributes && geo.morphAttributes.position;
-  const pos = geo.attributes.position, relative = !!geo.morphTargetsRelative;
-  const active = [];
-  if (morphs) for (let k = 0; k < influences.length; k++) if (Math.abs(influences[k]) > 0.002 && morphs[k]) active.push(k);
-  for (const s of faceDetails.strips) {
-    const attr = s.mesh.geometry.attributes.position, arr = attr.array;
-    for (let j = 0; j < s.vi.length; j++) {
-      const vi = s.vi[j];
-      let x = pos.getX(vi), y = pos.getY(vi), z = pos.getZ(vi);
-      const bx = x, by = y, bz = z;
-      for (const k of active) {
-        const m = morphs[k], w = influences[k];
-        x += w * (m.getX(vi) - (relative ? 0 : bx));
-        y += w * (m.getY(vi) - (relative ? 0 : by));
-        z += w * (m.getZ(vi) - (relative ? 0 : bz));
-      }
-      arr[j * 3] = x + s.off[j * 3]; arr[j * 3 + 1] = y + s.off[j * 3 + 1]; arr[j * 3 + 2] = z + s.off[j * 3 + 2];
-    }
-    attr.needsUpdate = true;
-  }
-}
-
-function setFaceDetails(browsOn) {
-  if (!head) return;
-  faceDetails.brows = !!browsOn;
-  try { localStorage.setItem("aria.brows", browsOn ? "on" : "off"); } catch {}
-  if (faceDetails.group) {
-    head.remove(faceDetails.group);
-    faceDetails.group.traverse((o) => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
-    faceDetails.group = null; faceDetails.strips = [];
-  }
-  if (!faceDetails.brows) return;
-  try {
-    const group = buildFaceDetails();
-    if (group) { head.add(group); updateFaceDetails(); }
-  } catch (error) {
-    console.warn("Aria: eyebrows could not be built", error);
-    faceDetails.group = null; faceDetails.strips = [];
-  }
-}
-
-function enhanceFace() {
-  if (!faceRoot || !head) return;
-  try { replaceEyes(); } catch (error) { console.warn("Aria: eye upgrade skipped", error); }
-  try { setFaceDetails(faceDetails.brows); } catch (error) { console.warn("Aria: face details skipped", error); }
-}
-
-function makePoreTexture() {
-  const size = 512, c = document.createElement("canvas");
-  c.width = c.height = size;
-  const ctx = c.getContext("2d"), img = ctx.createImageData(size, size);
-  for (let i = 0; i < img.data.length; i += 4) {
-    const n = 128 + (Math.random() - 0.5) * 70 + (Math.random() < 0.012 ? -55 : 0); // pores
-    img.data[i] = img.data[i + 1] = img.data[i + 2] = n; img.data[i + 3] = 255;
-  }
-  ctx.putImageData(img, 0, 0);
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(9, 9);
-  return tex;
+// ================================================================ skin tone
+// The built-in scan is untextured (pale grey). A warm, natural skin colour is
+// applied to the face only — eyes, teeth and tongue keep their own materials.
+const SKIN_TONES = {
+  fair: 0xf1d3bf, light: 0xe7bfa1, wheatish: 0xd9a47f, medium: 0xc48a63, brown: 0xa2694a, dark: 0x7a4b33,
+};
+let skinTone = "wheatish";
+try { skinTone = localStorage.getItem("aria.skinTone") || "wheatish"; } catch {}
+const skinBase = new THREE.Color(SKIN_TONES[skinTone] ?? SKIN_TONES.wheatish);
+const skinNow = new THREE.Color();
+function setSkinTone(name) {
+  skinTone = SKIN_TONES[name] ? name : "wheatish";
+  skinBase.set(SKIN_TONES[skinTone]);
+  try { localStorage.setItem("aria.skinTone", skinTone); } catch {}
 }
 
 function frameFace() {
@@ -951,8 +665,6 @@ function frameFace() {
   camera.far = Math.max(50, dist * 60);
   camera.updateProjectionMatrix();
 
-  const poreBump = makePoreTexture();
-
   // give the skin a touch more life from the environment
   faceRoot.traverse((o) => {
     if (o.isMesh && o.material) {
@@ -960,13 +672,9 @@ function frameFace() {
       for (const m of mats) {
         if ("envMapIntensity" in m) m.envMapIntensity = 1.15;
         // soft, slightly satin skin instead of plastic shine
-        if ("roughness" in m && o === head) {
-          m.roughness = Math.max(m.roughness ?? 0.6, 0.62);
-          if ("bumpMap" in m && o === head) {
-            // fine pore/skin micro-detail removes the smooth plastic "doll" look
-            m.bumpMap = poreBump; m.bumpScale = 0.9;
-          }
-          if ("sheen" in m) { m.sheen = 0.5; m.sheenRoughness = 0.5; m.sheenColor?.set?.(0xffc9b0); }
+        if (o === head && "roughness" in m) {
+          m.roughness = Math.max(m.roughness ?? 0.6, 0.55); // soft skin, not plastic
+          m.color?.copy?.(skinBase);
         }
         m.needsUpdate = true;
       }
@@ -1114,24 +822,6 @@ function updateScene() {
     gazeX += (gazeTX - gazeX) * Math.min(1, dt * 10);
     gazeY += (gazeTY - gazeY) * Math.min(1, dt * 10);
     applyGaze();
-    // tiny involuntary eye tremor (micro-saccades) keeps the eyes alive while still
-    microT -= dt;
-    if (microT <= 0) { microX = (Math.random() - 0.5) * 0.022; microY = (Math.random() - 0.5) * 0.016; microT = 0.25 + Math.random() * 0.6; }
-    // the catchlight swells slightly with interest (listening/emotion), shrinks when thinking
-    const pupilTarget = 1 + (listening ? 0.08 : 0) + emotionGain * 0.06 - (thinking ? 0.05 : 0) + 0.02 * Math.sin(t * 0.6);
-    pupilScale += (pupilTarget - pupilScale) * Math.min(1, dt * 1.5);
-    for (const eye of eyeballs) {
-      eye.rotation.y = THREE.MathUtils.clamp(gazeX, -1, 1) * 0.34 + microX;
-      eye.rotation.x = THREE.MathUtils.clamp(gazeY, -1, 1) * 0.26 - blink * 0.2 + microY;
-      const glint = eye.userData.glint;
-      if (glint) {
-        // the reflection belongs to the light, not the eyeball: counter-rotate it
-        const r = eye.userData.radius;
-        glint.position.set(r * (0.32 - eye.rotation.y * 0.55), r * (0.36 + eye.rotation.x * 0.55), r * 0.93);
-        glint.scale.setScalar(pupilScale);
-        glint.material.opacity = 0.92 * (1 - blink); // hidden while the lid is closed
-      }
-    }
 
     // Real neural-audio amplitude drives jaw/lip strength. This closes the
     // mouth during actual pauses and opens it on voiced syllables.
@@ -1222,7 +912,9 @@ function updateScene() {
     // warm blush when smiling or emotionally engaged
     if (head.material && !Array.isArray(head.material) && head.material.color) {
       const b = THREE.MathUtils.clamp(smileNow * 1.4 + emotionGain * 0.25, 0, 1);
-      head.material.color.setRGB(1, 1 - 0.045 * b, 1 - 0.075 * b);
+      skinNow.copy(skinBase);
+      skinNow.g *= 1 - 0.05 * b; skinNow.b *= 1 - 0.08 * b;
+      head.material.color.copy(skinNow);
     }
     // a real blink pulls the brows down a hair and narrows the lower lid
     if (blink > 0.05) {
@@ -1239,9 +931,6 @@ function updateScene() {
     const lid = Math.max(0, gazeY) * 0.3 + (thinking ? 0.06 : 0);
     if (bL >= 0) influences[bL] = Math.max(blink * blinkProfile.left, lid);
     if (bR >= 0) influences[bR] = Math.max(blink * blinkProfile.right, lid);
-
-    // brows ride on the morphed skin, so run after every influence is final
-    updateFaceDetails();
   }
 
   // smooth pointer
@@ -1318,20 +1007,11 @@ function canvasIsBlank() {
 }
 function healIfBlank() {
   healFrame++;
-  if (healStage >= 3 || healFrame < 40 || healFrame % 30 !== 0 || healFrame > 400) return;
+  if (healStage >= 1 || healFrame < 40 || healFrame % 30 !== 0 || healFrame > 400) return;
   if (!canvasIsBlank()) return;
   healStage++;
-  if (healStage === 1) {
-    reportAvatarError("blank canvas", new Error("removing eyebrows"));
-    if (faceDetails.group) { head.remove(faceDetails.group); faceDetails.group = null; faceDetails.strips = []; }
-  } else if (healStage === 2) {
-    reportAvatarError("blank canvas", new Error("switching to plain rendering"));
-    useComposer = false;
-  } else {
-    reportAvatarError("blank canvas", new Error("restoring original eyes"));
-    for (const eye of eyeballs) eye.visible = false;
-    scene.traverse((o) => { if (o.isMesh && o !== head && /eye/i.test(o.name || "")) o.visible = true; });
-  }
+  reportAvatarError("blank canvas", new Error("switching to plain rendering"));
+  useComposer = false;
 }
 function animate() {
   try { updateScene(); } catch (error) { reportAvatarError("animation", error); }
@@ -1356,7 +1036,7 @@ window.ariaAvatar = {
   stopTalking() { cancelSpeak(); },
   setVoice(on) { voiceOn = !!on; if (!on) cancelSpeak(); },
   setLanguage(language) { preferredLanguage = language || "en-IN"; },
-  setFaceDetails(brows) { setFaceDetails(brows); },
+  setSkinTone(name) { setSkinTone(name); },
   setPhase(next) {
     thinking = next === "thinking";
     listening = next === "listening";

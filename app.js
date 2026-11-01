@@ -88,7 +88,7 @@ const modal = el("modal");
 const apiKeyInput = el("apiKey");
 const sarvamApiKeyInput = el("sarvamApiKey");
 const avatarModelInput = el("avatarModel");
-const browsSelect = el("browsSelect");
+const skinToneSelect = el("skinToneSelect");
 const modelInput = el("model");
 const personaInput = el("persona");
 const voiceSelect = el("voiceSelect");
@@ -133,7 +133,7 @@ const store = {
 };
 
 function removeRetiredProviderData() {
-  ["aria.googleApiKey", "aria.googleTtsModel", "aria.sonexApiKey", "aria.sonexVoiceId", "aria.stabilityApiKey", "aria.imageEngine", "aria.hairStyle", "aria.hairColor", "aria.hairCover"]
+  ["aria.googleApiKey", "aria.googleTtsModel", "aria.sonexApiKey", "aria.sonexVoiceId", "aria.stabilityApiKey", "aria.imageEngine", "aria.hairStyle", "aria.hairColor", "aria.hairCover", "aria.brows", "aria.lashes"]
     .forEach((key) => store.remove(key));
   if ((store.get(TTS_MODEL_STORE) || "").startsWith("google/")) {
     store.set(TTS_MODEL_STORE, DEFAULT_TTS_MODEL);
@@ -262,7 +262,7 @@ function loadSettings() {
   ttsModelInput.value = getTtsModel();
   imageAspectSelect.value = getImageAspect();
   avatarModelInput.value = store.get(AVATAR_MODEL_STORE) || "";
-  browsSelect.value = store.get("aria.brows") === "off" ? "off" : "on";
+  skinToneSelect.value = store.get("aria.skinTone") || "wheatish";
   populateVoices();
 }
 
@@ -306,7 +306,7 @@ saveBtn.addEventListener("click", () => {
   store.set(TTS_MODE_STORE, ["auto", "browser", "openrouter", "sarvam"].includes(ttsModeSelect.value) ? ttsModeSelect.value : "auto");
   store.set(TTS_MODEL_STORE, ttsModelInput.value.trim() || DEFAULT_TTS_MODEL);
   store.set(IMAGE_ASPECT_STORE, imageAspectSelect.value || "1:1");
-  window.ariaAvatar?.setFaceDetails?.(browsSelect.value !== "off");
+  window.ariaAvatar?.setSkinTone?.(skinToneSelect.value || "wheatish");
   const modelUrl = avatarModelInput.value.trim();
   if (!modelUrl || /^https:\/\/|^\.?\.?\//.test(modelUrl)) store.set(AVATAR_MODEL_STORE, modelUrl);
   else toast("Avatar model URL must start with https:// — it was not saved.", "error", 6000);
@@ -332,7 +332,7 @@ try { window.speechSynthesis?.addEventListener?.("voiceschanged", populateVoices
 window.addEventListener("aria-avatar-ready", syncAvatarSettings);
 // Surface avatar problems on screen (once each) instead of failing silently.
 window.addEventListener("aria-avatar-error", (event) => {
-  toast(`Avatar issue: ${event.detail}. The chat still works — try Ctrl+Shift+R, or turn off Eyebrows in Settings.`, "error", 12000);
+  toast(`Avatar issue: ${event.detail}. The chat still works — try Ctrl+Shift+R, or reload the page.`, "error", 12000);
 });
 window.addEventListener("aria-speech-error", (event) => {
   toast(event.detail || "Speech playback failed.", "error", 10000);
