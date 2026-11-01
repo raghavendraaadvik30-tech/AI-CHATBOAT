@@ -91,6 +91,8 @@ const avatarModelInput = el("avatarModel");
 const skinToneSelect = el("skinToneSelect");
 const browsSelect = el("browsSelect");
 const catEyeSelect = el("catEyeSelect");
+const eyeColorSelect = el("eyeColorSelect");
+const browColorSelect = el("browColorSelect");
 const modelInput = el("model");
 const personaInput = el("persona");
 const voiceSelect = el("voiceSelect");
@@ -267,6 +269,8 @@ function loadSettings() {
   skinToneSelect.value = store.get("aria.skinTone") || "wheatish";
   browsSelect.value = store.get("aria.brows") === "off" ? "off" : "on";
   catEyeSelect.value = store.get("aria.catEye") === "off" ? "off" : "on";
+  eyeColorSelect.value = store.get("aria.eyeColor") || "blue";
+  browColorSelect.value = store.get("aria.browColor") || "darkbrown";
   populateVoices();
 }
 
@@ -311,6 +315,8 @@ saveBtn.addEventListener("click", () => {
   store.set(TTS_MODEL_STORE, ttsModelInput.value.trim() || DEFAULT_TTS_MODEL);
   store.set(IMAGE_ASPECT_STORE, imageAspectSelect.value || "1:1");
   window.ariaAvatar?.setSkinTone?.(skinToneSelect.value || "wheatish");
+  window.ariaAvatar?.setEyeColor?.(eyeColorSelect.value || "blue");
+  window.ariaAvatar?.setBrowColor?.(browColorSelect.value || "darkbrown");
   window.ariaAvatar?.setCatEye?.(catEyeSelect.value !== "off");
   window.ariaAvatar?.setBrows?.(browsSelect.value !== "off");
   const modelUrl = avatarModelInput.value.trim();

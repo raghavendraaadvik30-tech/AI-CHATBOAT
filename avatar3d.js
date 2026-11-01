@@ -78,6 +78,162 @@ const eyeEnvironment = pmrem.fromScene(new RoomEnvironment(renderer), 0).texture
 const eyeMaterials = [];
 const EYE_SPARKLE = 2.4;
 
+// ================================================================ iris colour (shader)
+// Recolours the model's OWN eyes: the iris is computed per pixel from each eye's
+// real 3D shape and the direction it faces — no texture layout assumptions, no
+// extra geometry, crisp at any size, and it turns with the eye.
+const IRIS_COLORS = {
+  blue:  { inner: 0x9fdcff, mid: 0x2f7fe0, outer: 0x0a1f4d },   // "blue diamond"
+  green: { inner: 0xc8e79a, mid: 0x3f8f52, outer: 0x10301c },
+  hazel: { inner: 0xe0b56a, mid: 0x7a5a2a, outer: 0x2a1a0c },
+  brown: { inner: 0xb57a43, mid: 0x5a3519, outer: 0x1c0f07 },
+  grey:  { inner: 0xdfe8ee, mid: 0x7d8c99, outer: 0x2a3138 },
+};
+let eyeColor = "blue";
+try { eyeColor = localStorage.getItem("aria.eyeColor") || "blue"; } catch {}
+const irisUniforms = {
+  uIrisInner: { value: new THREE.Color(IRIS_COLORS.blue.inner) },
+  uIrisMid: { value: new THREE.Color(IRIS_COLORS.blue.mid) },
+  uIrisOuter: { value: new THREE.Color(IRIS_COLORS.blue.outer) },
+  uIrisSize: { value: 0.5 },     // iris radius as an angle from the eye's forward axis (radians)
+  uPupilSize: { value: 0.16 },
+};
+const irisEyes = [];             // { mesh, material, center, fwd }
+let irisDisabled = false;
+
+const IRIS_VERTEX_DECL = "varying vec3 vEyeLocal;\n";
+const IRIS_FRAGMENT_DECL = [
+  "varying vec3 vEyeLocal;",
+  "uniform vec3 uEyeCenter;",
+  "uniform vec3 uEyeFwd;",
+  "uniform vec3 uIrisInner;",
+  "uniform vec3 uIrisMid;",
+  "uniform vec3 uIrisOuter;",
+  "uniform float uIrisSize;",
+  "uniform float uPupilSize;",
+  "",
+].join("\n");
+const IRIS_FRAGMENT_CODE = `
+{
+  vec3 eyeDir = normalize(vEyeLocal - uEyeCenter);
+  float ang = acos(clamp(dot(eyeDir, uEyeFwd), -1.0, 1.0));
+  vec3 helper = abs(uEyeFwd.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+  vec3 ax = normalize(cross(uEyeFwd, helper));
+  vec3 ay = cross(uEyeFwd, ax);
+  float phi = atan(dot(eyeDir, ay), dot(eyeDir, ax));
+  float rr = ang / uIrisSize;
+  vec3 sclera = mix(vec3(0.97, 0.965, 0.95), vec3(0.80, 0.78, 0.78), smoothstep(1.4, 2.6, rr));
+  vec3 iris = mix(uIrisInner, uIrisMid, smoothstep(0.25, 0.7, rr));
+  iris = mix(iris, uIrisOuter, smoothstep(0.78, 0.98, rr));
+  float fib = 0.5 + 0.5 * sin(phi * 47.0 + sin(phi * 13.0) * 2.0);
+  float fib2 = 0.5 + 0.5 * sin(phi * 89.0 + rr * 6.0);
+  float ring = 1.0 - smoothstep(0.85, 1.0, rr);
+  iris *= 0.82 + 0.28 * fib * ring;
+  iris += vec3(0.10, 0.16, 0.22) * pow(fib2, 6.0) * smoothstep(0.3, 0.6, rr) * (1.0 - smoothstep(0.8, 0.95, rr));
+  float facet = pow(abs(sin(phi * 6.0 + rr * 3.0)), 24.0) * smoothstep(0.35, 0.55, rr) * (1.0 - smoothstep(0.7, 0.85, rr));
+  iris += vec3(0.25, 0.35, 0.45) * facet;
+  float pupilEdge = uPupilSize / uIrisSize;
+  vec3 eyeCol = mix(iris, vec3(0.012, 0.012, 0.018), 1.0 - smoothstep(pupilEdge - 0.04, pupilEdge + 0.02, rr));
+  eyeCol = mix(eyeCol, sclera, smoothstep(0.98, 1.06, rr));
+  diffuseColor.rgb = eyeCol;
+}
+`;
+
+// Least-squares sphere through the eye's vertices (works for whole eyeballs and
+// for front caps); falls back to the bounding-box centre.
+function fitSphere(pos) {
+  const n = pos.count;
+  if (!n || n < 4) return null;
+  const M = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], B = [0, 0, 0, 0];
+  let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    minX = Math.min(minX, x); minY = Math.min(minY, y); minZ = Math.min(minZ, z);
+    maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); maxZ = Math.max(maxZ, z);
+    const row = [x, y, z, 1], rhs = -(x * x + y * y + z * z);
+    for (let a = 0; a < 4; a++) { B[a] += row[a] * rhs; for (let b = 0; b < 4; b++) M[a][b] += row[a] * row[b]; }
+  }
+  const box = { x: (minX + maxX) / 2, y: (minY + maxY) / 2, z: (minZ + maxZ) / 2, r: Math.max(maxX - minX, maxY - minY, maxZ - minZ) / 2 };
+  // Gaussian elimination
+  for (let c = 0; c < 4; c++) {
+    let p = c;
+    for (let r = c + 1; r < 4; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+    if (Math.abs(M[p][c]) < 1e-12) return box;
+    [M[c], M[p]] = [M[p], M[c]]; [B[c], B[p]] = [B[p], B[c]];
+    for (let r = c + 1; r < 4; r++) { const f = M[r][c] / M[c][c]; for (let k = c; k < 4; k++) M[r][k] -= f * M[c][k]; B[r] -= f * B[c]; }
+  }
+  const s = [0, 0, 0, 0];
+  for (let r = 3; r >= 0; r--) { let acc = B[r]; for (let k = r + 1; k < 4; k++) acc -= M[r][k] * s[k]; s[r] = acc / M[r][r]; }
+  const cx = -s[0] / 2, cy = -s[1] / 2, cz = -s[2] / 2, rr = Math.sqrt(cx * cx + cy * cy + cz * cz - s[3]);
+  const ok = [cx, cy, cz, rr].every(Number.isFinite) && rr > 0 && rr < box.r * 4 &&
+    Math.abs(cx - box.x) < box.r * 3 && Math.abs(cy - box.y) < box.r * 3 && Math.abs(cz - box.z) < box.r * 3;
+  return ok ? { x: cx, y: cy, z: cz, r: rr } : box;
+}
+
+function installIris(mesh) {
+  const m = mesh.material;
+  const pos = mesh.geometry?.attributes?.position;
+  if (!m || Array.isArray(m) || !pos) return false;
+  const sphere = fitSphere(pos);
+  if (!sphere) return false;
+  mesh.updateMatrixWorld(true);
+  // forward = the face's forward direction (+Z in the world), in the eye's own space
+  const inv = new THREE.Matrix4().copy(mesh.matrixWorld).invert();
+  const fwd = new THREE.Vector3(0, 0, 1).transformDirection(inv);
+  if (![fwd.x, fwd.y, fwd.z].every(Number.isFinite)) return false;
+  const center = new THREE.Vector3(sphere.x, sphere.y, sphere.z);
+  m.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, irisUniforms, { uEyeCenter: { value: center }, uEyeFwd: { value: fwd } });
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\n" + IRIS_VERTEX_DECL)
+      .replace("#include <project_vertex>", "vEyeLocal = transformed;\n#include <project_vertex>");
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", "#include <common>\n" + IRIS_FRAGMENT_DECL)
+      .replace("#include <map_fragment>", "#include <map_fragment>\n" + IRIS_FRAGMENT_CODE);
+  };
+  m.customProgramCacheKey = () => "aria-iris-v1";
+  m.needsUpdate = true;
+  irisEyes.push({ mesh, material: m, center, fwd });
+  return true;
+}
+
+function removeIris() {
+  for (const e of irisEyes) {
+    e.material.onBeforeCompile = () => {};
+    e.material.customProgramCacheKey = () => "aria-iris-off";
+    e.material.needsUpdate = true;
+  }
+  irisEyes.length = 0;
+}
+
+function applyEyeColor(name) {
+  eyeColor = name === "natural" || IRIS_COLORS[name] ? name : "blue";
+  try { localStorage.setItem("aria.eyeColor", eyeColor); } catch {}
+  removeIris();
+  if (eyeColor === "natural" || irisDisabled) return;
+  const c = IRIS_COLORS[eyeColor];
+  irisUniforms.uIrisInner.value.set(c.inner);
+  irisUniforms.uIrisMid.value.set(c.mid);
+  irisUniforms.uIrisOuter.value.set(c.outer);
+  for (const mesh of eyeMeshes) installIris(mesh);
+}
+
+// Safety net: if a graphics driver ever rejects the iris shader, go back to the
+// model's natural eyes immediately instead of showing broken (black) eyes.
+if (renderer.debug) {
+  renderer.debug.onShaderError = (gl, program, vs, fs) => {
+    let ours = false;
+    try { ours = /uIrisInner/.test(gl.getShaderSource(fs) || ""); } catch {}
+    if (ours) {
+      irisDisabled = true;
+      removeIris();
+      reportAvatarError("eye colour", new Error("this graphics card rejected the iris shader; using natural eyes"));
+    } else {
+      console.error("Aria: shader error", gl.getProgramInfoLog?.(program));
+    }
+  };
+}
+
 // studio 3-point rig for flattering, realistic skin
 const keyLight = new THREE.DirectionalLight(0xffe9d2, 2.5);
 keyLight.position.set(1.6, 1.9, 2.4); scene.add(keyLight);
@@ -626,6 +782,7 @@ new GLTFLoader()
       container.classList.add("ready"); // trigger CSS fade-in
       resize();
       try { applyBrows(browsOn); } catch (error) { reportAvatarError("brows", error); }
+      try { applyEyeColor(eyeColor); } catch (error) { reportAvatarError("eye colour", error); }
     },
     (ev) => { if (ev.total) setLoader(`Loading Aria… ${Math.round((ev.loaded / ev.total) * 100)}%`); },
     (err) => {
@@ -693,7 +850,10 @@ function pickPair(list) {
 
 let browsOn = true;
 try { browsOn = localStorage.getItem("aria.brows") !== "off"; } catch {}
-const BROW_TINT = [0.24, 0.18, 0.15];  // multiplies the skin colour -> dark brown brow
+// brow colours multiply the skin colour
+const BROW_COLORS = { darkbrown: [0.24, 0.18, 0.15], black: [0.13, 0.11, 0.11], softbrown: [0.36, 0.27, 0.22] };
+let browColor = "darkbrown";
+try { browColor = localStorage.getItem("aria.browColor") || "darkbrown"; } catch {}
 const LID_TINT = [0.18, 0.15, 0.14];   // dark lash line / cat-eye liner
 let catEye = true;
 try { catEye = localStorage.getItem("aria.catEye") !== "off"; } catch {}
@@ -779,7 +939,8 @@ function applyBrows(on) {
     if (w) {
       for (let i = 0; i < count; i++) {
         for (let k = 0; k < 3; k++) {
-          const b = 1 + (BROW_TINT[k] - 1) * w.brow[i];
+          const tint = BROW_COLORS[browColor] || BROW_COLORS.darkbrown;
+          const b = 1 + (tint[k] - 1) * w.brow[i];
           const l = 1 + (LID_TINT[k] - 1) * w.lid[i] * 0.85;
           colors[i * 3 + k] = Math.min(b, l);
         }
@@ -1233,6 +1394,12 @@ window.ariaAvatar = {
   setLanguage(language) { preferredLanguage = language || "en-IN"; },
   setSkinTone(name) { setSkinTone(name); },
   setBrows(on) { try { applyBrows(on); } catch (error) { reportAvatarError("brows", error); } },
+  setEyeColor(name) { try { applyEyeColor(name); } catch (error) { reportAvatarError("eye colour", error); } },
+  setBrowColor(name) {
+    browColor = BROW_COLORS[name] ? name : "darkbrown";
+    try { localStorage.setItem("aria.browColor", browColor); } catch {}
+    try { applyBrows(browsOn); } catch (error) { reportAvatarError("brows", error); }
+  },
   setCatEye(on) {
     catEye = !!on;
     try { localStorage.setItem("aria.catEye", catEye ? "on" : "off"); } catch {}

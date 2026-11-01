@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <meta name="theme-color" content="#0d0b1f" />
-  <link rel="stylesheet" href="style.css?v=36" />
+  <link rel="stylesheet" href="style.css?v=37" />
 
   <!-- Three.js via import map (jsDelivr: reliable CORS + binary assets) -->
   <script type="importmap">
@@ -221,6 +221,25 @@
         <small>Painted into the skin, so they move with her expressions.</small>
       </label>
       <label class="field">
+        <span>Eye colour</span>
+        <select id="eyeColorSelect">
+          <option value="blue">Blue diamond</option>
+          <option value="green">Emerald green</option>
+          <option value="hazel">Hazel</option>
+          <option value="brown">Brown</option>
+          <option value="grey">Grey</option>
+          <option value="natural">Natural (model's own)</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Eyebrow colour</span>
+        <select id="browColorSelect">
+          <option value="darkbrown">Dark brown</option>
+          <option value="black">Black</option>
+          <option value="softbrown">Soft brown</option>
+        </select>
+      </label>
+      <label class="field">
         <span>Cat-eye liner</span>
         <select id="catEyeSelect"><option value="on">On</option><option value="off">Off</option></select>
         <small>A soft winged lash line that makes the eyes stand out.</small>
@@ -253,7 +272,7 @@
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
   <!-- 3D avatar engine, followed by app coordinator -->
-  <script type="module" src="avatar3d.js?v=36"></script>
-  <script type="module" src="app.js?v=36"></script>
+  <script type="module" src="avatar3d.js?v=37"></script>
+  <script type="module" src="app.js?v=37"></script>
 </body>
 </html>
