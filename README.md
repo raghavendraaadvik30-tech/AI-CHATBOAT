@@ -29,13 +29,12 @@ moves her **jaw and mouth** while she answers, powered by the
   question. Use the red ■ control to interrupt a response safely.
 - **Automatic image requests** — typed or spoken requests such as “generate an
   image of a tiger”, “show me a picture of Bengaluru”, `/image ...`, or
-  “ಬೆಂಗಳೂರಿನ ಚಿತ್ರವನ್ನು ರಚಿಸಿ” route directly to Stability AI. Questions about
+  “ಬೆಂಗಳೂರಿನ ಚಿತ್ರವನ್ನು ರಚಿಸಿ” route directly to Cloudflare Workers AI. Questions about
   camera images continue to use vision chat instead of generating new images.
-- **Stability AI image generation** — use Stable Image Core or Ultra with
-  configurable aspect ratios. The Node server proxy avoids browser CORS and
-  keeps the key server-side. Every request has a deadline, live elapsed time,
-  immediate cancellation (including decode), response-size checks, and a
-  downloadable PNG result.
+- **Cloudflare Workers AI image generation** — FLUX.1 schnell by default, with
+  configurable aspect ratios. The Node server proxy keeps the token server-side.
+  Every request has a deadline, live elapsed time, immediate cancellation, and
+  a downloadable result.
 - **Vision (camera)** — tap 📷 to share your webcam. A live preview appears over
   the avatar. Each turn can include two chronological frames, allowing Aria to
   inspect static details (fingers, shirt colour, objects) and simple visible
@@ -55,30 +54,24 @@ moves her **jaw and mouth** while she answers, powered by the
 
 ## 🚀 Getting started
 
-1. Use Node 18 or newer. Export a rotated Stability key and start the included
-   same-origin proxy:
-   ```bash
-   export STABILITY_API_KEY="your-rotated-stability-key"
-   export SARVAM_API_KEY="your-rotated-sarvam-key"   # Indian-language speech
-   npm start
-   ```
-   To generate images with **Cloudflare Workers AI** instead of Stability,
-   set these (token needs the Workers AI permission) and leave
-   `STABILITY_API_KEY` unset:
+1. Use Node 18 or newer. Export your keys and start the included same-origin
+   proxy:
    ```bash
    export CLOUDFLARE_ACCOUNT_ID="your-account-id"
-   export CLOUDFLARE_API_TOKEN="your-workers-ai-token"
+   export CLOUDFLARE_API_TOKEN="your-workers-ai-token"   # needs Workers AI permission
+   export SARVAM_API_KEY="your-sarvam-key"               # Indian-language speech
    # optional: CLOUDFLARE_IMAGE_MODEL (default @cf/black-forest-labs/flux-1-schnell)
+   npm start
    ```
 2. Open `http://localhost:8000` in Chrome or Edge.
 3. Click **⚙ settings**. OpenRouter handles chat, camera vision, and speech;
-   Stability AI handles image generation. No other provider key is used.
+   Cloudflare Workers AI handles image generation. No other provider key is used.
 4. Choose English, Kannada, Hindi, Tamil, Telugu, or Malayalam. Tap 📞 for a
    no-echo conversation or 🎤 for one voice turn. Ask “generate an image of…”
-   by text or voice to route that request automatically to Stability AI.
+   by text or voice to route that request automatically to Cloudflare Workers AI.
 
 Your keys are stored in the browser's `localStorage` only when entered in
-Settings. Server environment keys stay server-side. OpenRouter and Stability
+Settings. Server environment keys stay server-side. OpenRouter and Cloudflare
 credentials are sent only to their matching provider. Retired provider
 credentials and old speech-model settings are purged on load.
 
@@ -89,7 +82,7 @@ credentials and old speech-model settings are purged on load.
 ├── index.html    # markup, import map, 3D canvas + chat UI
 ├── style.css     # theme, layout, animations
 ├── avatar3d.js   # Three.js engine: loads the face, blink/breathe/talk
-├── server.mjs    # static server + secure Stability image proxy
+├── server.mjs    # static server + secure Cloudflare image proxy
 ├── package.json  # dependency-free npm start command
 ├── app.js        # chat, live-call, provider and image-generation coordinator
 └── README.md
@@ -98,12 +91,11 @@ credentials and old speech-model settings are purged on load.
 > **Note:** the 3D avatar loads Three.js and the face model from a CDN, so an
 > internet connection is required. `npm start` is recommended because it also
 > enables the same-origin image proxy. `python3 -m http.server 8000` still runs
-> the client, but Stability generation then depends on the optional browser key
-> and the provider's CORS policy.
+> the client, but image generation will not work because it needs the proxy.
 
 ## ⚠️ Security note
 
-The Node proxy keeps `STABILITY_API_KEY` server-side. The OpenRouter key is
+The Node proxy keeps `CLOUDFLARE_API_TOKEN` server-side. The OpenRouter key is
 stored in browser `localStorage` for this local/personal demo. Before a public
 release, proxy OpenRouter too, then add authentication and rate limiting.
 

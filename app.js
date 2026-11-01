@@ -11,8 +11,6 @@ const LANGUAGE_STORE = "aria.language";
 const TTS_MODE_STORE = "aria.ttsMode";
 const TTS_MODEL_STORE = "aria.ttsModel";
 const SARVAM_KEY_STORE = "aria.sarvamApiKey";
-const STABILITY_KEY_STORE = "aria.stabilityApiKey";
-const IMAGE_ENGINE_STORE = "aria.imageEngine";
 const IMAGE_ASPECT_STORE = "aria.imageAspect";
 const DEFAULT_TTS_MODEL = "fish-audio/drama-3";
 
@@ -85,14 +83,12 @@ const speechProvider = el("speechProvider");
 const modal = el("modal");
 const apiKeyInput = el("apiKey");
 const sarvamApiKeyInput = el("sarvamApiKey");
-const stabilityApiKeyInput = el("stabilityApiKey");
 const modelInput = el("model");
 const personaInput = el("persona");
 const voiceSelect = el("voiceSelect");
 const languageSelect = el("languageSelect");
 const ttsModeSelect = el("ttsModeSelect");
 const ttsModelInput = el("ttsModel");
-const imageEngineSelect = el("imageEngineSelect");
 const imageAspectSelect = el("imageAspectSelect");
 const imageBtn = el("imageBtn");
 const toastsBox = el("toasts");
@@ -131,7 +127,7 @@ const store = {
 };
 
 function removeRetiredProviderData() {
-  ["aria.googleApiKey", "aria.googleTtsModel", "aria.sonexApiKey", "aria.sonexVoiceId"]
+  ["aria.googleApiKey", "aria.googleTtsModel", "aria.sonexApiKey", "aria.sonexVoiceId", "aria.stabilityApiKey", "aria.imageEngine"]
     .forEach((key) => store.remove(key));
   if ((store.get(TTS_MODEL_STORE) || "").startsWith("google/")) {
     store.set(TTS_MODEL_STORE, DEFAULT_TTS_MODEL);
@@ -140,8 +136,6 @@ function removeRetiredProviderData() {
 
 function getKey() { return store.get(KEY_STORE) || ""; }
 function getSarvamKey() { return store.get(SARVAM_KEY_STORE) || ""; }
-function getStabilityKey() { return store.get(STABILITY_KEY_STORE) || ""; }
-function getImageEngine() { return store.get(IMAGE_ENGINE_STORE) || "core"; }
 function getImageAspect() { return store.get(IMAGE_ASPECT_STORE) || "1:1"; }
 function getModel() { return store.get(MODEL_STORE) || DEFAULT_MODEL; }
 function getPersona() { return store.get(PERSONA_STORE) || DEFAULT_PERSONA; }
@@ -199,13 +193,11 @@ function populateVoices() {
 function loadSettings() {
   apiKeyInput.value = getKey();
   sarvamApiKeyInput.value = getSarvamKey();
-  stabilityApiKeyInput.value = getStabilityKey();
   modelInput.value = getModel();
   personaInput.value = getPersona();
   languageSelect.value = getLanguage();
   ttsModeSelect.value = getTtsMode();
   ttsModelInput.value = getTtsModel();
-  imageEngineSelect.value = getImageEngine();
   imageAspectSelect.value = getImageAspect();
   populateVoices();
 }
@@ -244,13 +236,11 @@ saveBtn.addEventListener("click", () => {
   const language = LANGUAGES[languageSelect.value] ? languageSelect.value : "en-IN";
   store.set(KEY_STORE, apiKeyInput.value.trim());
   store.set(SARVAM_KEY_STORE, sarvamApiKeyInput.value.trim());
-  store.set(STABILITY_KEY_STORE, stabilityApiKeyInput.value.trim());
   store.set(MODEL_STORE, modelInput.value.trim() || DEFAULT_MODEL);
   store.set(PERSONA_STORE, personaInput.value.trim() || DEFAULT_PERSONA);
   store.set(LANGUAGE_STORE, language);
   store.set(TTS_MODE_STORE, ["auto", "browser", "openrouter", "sarvam"].includes(ttsModeSelect.value) ? ttsModeSelect.value : "auto");
   store.set(TTS_MODEL_STORE, ttsModelInput.value.trim() || DEFAULT_TTS_MODEL);
-  store.set(IMAGE_ENGINE_STORE, imageEngineSelect.value || "core");
   store.set(IMAGE_ASPECT_STORE, imageAspectSelect.value || "1:1");
   document.documentElement.lang = language;
   store.set(VOICE_NAME_STORE, voiceSelect.value || "");
@@ -433,7 +423,7 @@ cameraBtn.addEventListener("click", () => {
 });
 window.addEventListener("pagehide", stopCamera);
 
-// ------------------------------------------------------------------ Stability AI image generation
+// ------------------------------------------------------------------ Cloudflare Workers AI image generation
 const generatedImageUrls = new Set();
 let imageGenerationSequence = 0;
 
@@ -502,7 +492,7 @@ function cancelImageGeneration(generation, timedOut = false) {
     generation.objectUrl = null;
   }
   showImageTerminal(generation, timedOut ? "Image generation timed out" : "Generation cancelled", true);
-  if (timedOut) toast("Image generation timed out. Try Stable Image Core or a shorter prompt.", "error", 8000);
+  if (timedOut) toast("Image generation timed out. Try a shorter prompt.", "error", 8000);
   releaseImageGeneration(generation);
 }
 
@@ -512,63 +502,25 @@ function assertGenerationActive(generation) {
   }
 }
 
-async function requestImageViaProxy(prompt, engine, aspectRatio, generation) {
-  if (location.protocol === "file:") return null;
-  const response = await fetch("/api/stability/generate", {
+async function requestGeneratedImage(prompt, aspectRatio, generation) {
+  generation.ui.state.textContent = "Generating through Cloudflare Workers AI…";
+  if (location.protocol === "file:") {
+    throw new Error("Open the app through `npm start` so the Cloudflare image proxy is available.");
+  }
+  const response = await fetch("/api/image/generate", {
     method: "POST",
     signal: generation.controller.signal,
     headers: { "Content-Type": "application/json", Accept: "image/*, application/json" },
-    body: JSON.stringify({ prompt, engine, aspectRatio }),
+    body: JSON.stringify({ prompt, aspectRatio }),
   });
   if (response.ok) return response.blob();
 
   let body = {};
   try { body = await response.json(); } catch {}
-  const unavailable = response.status === 404 || response.status === 405 || response.status === 501
-    || (response.status === 503 && body.code === "image_proxy_unconfigured");
-  if (unavailable) return null;
+  if (response.status === 503 && body.code === "image_proxy_unconfigured") {
+    throw new Error("Image generation is not configured. Set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN on the server.");
+  }
   throw new Error(`Image proxy ${response.status}: ${body.detail || body.error || "request failed"}`);
-}
-
-async function requestImageDirect(prompt, engine, aspectRatio, generation) {
-  const key = getStabilityKey();
-  if (!key) {
-    const error = new Error("Configure STABILITY_API_KEY on the Node server or add a Stability key in Settings.");
-    error.code = "missing_stability_key";
-    throw error;
-  }
-  const form = new FormData();
-  form.append("prompt", prompt);
-  form.append("aspect_ratio", aspectRatio);
-  form.append("output_format", "png");
-
-  try {
-    const response = await fetch(`https://api.stability.ai/v2beta/stable-image/generate/${engine}`, {
-      method: "POST",
-      signal: generation.controller.signal,
-      headers: { Authorization: `Bearer ${key}`, Accept: "image/*" },
-      body: form,
-    });
-    if (!response.ok) {
-      const detail = (await response.text()).slice(0, 240);
-      throw new Error(`Stability AI ${response.status}: ${detail}`);
-    }
-    return response.blob();
-  } catch (error) {
-    if (error?.name === "TypeError") {
-      throw new Error("Direct Stability request was blocked by the network or browser CORS. Run `npm start` with STABILITY_API_KEY to use the same-origin proxy.");
-    }
-    throw error;
-  }
-}
-
-async function requestGeneratedImage(prompt, engine, aspectRatio, generation) {
-  generation.ui.state.textContent = "Connecting to image service…";
-  const proxied = await requestImageViaProxy(prompt, engine, aspectRatio, generation);
-  assertGenerationActive(generation);
-  if (proxied) return proxied;
-  generation.ui.state.textContent = "Generating through Stability AI…";
-  return requestImageDirect(prompt, engine, aspectRatio, generation);
 }
 
 function decodeGeneratedImage(image, generation) {
@@ -599,7 +551,6 @@ async function generateImage(prompt, displayedRequest = prompt) {
   addMessage("user", `${displayedRequest}  🎨`);
   input.value = "";
 
-  const engine = getImageEngine() === "ultra" ? "ultra" : "core";
   const generation = {
     id: ++imageGenerationSequence,
     controller: new AbortController(),
@@ -616,7 +567,7 @@ async function generateImage(prompt, displayedRequest = prompt) {
   imageBtn.classList.add("generating");
 
   const startedAt = Date.now();
-  const timeoutMs = engine === "ultra" ? 180_000 : 120_000;
+  const timeoutMs = 120_000;
   generation.timeoutId = setTimeout(() => cancelImageGeneration(generation, true), timeoutMs);
   generation.elapsedId = setInterval(() => {
     if (!generation.terminal) {
@@ -627,7 +578,7 @@ async function generateImage(prompt, displayedRequest = prompt) {
   generation.ui.cancel.addEventListener("click", () => cancelImageGeneration(generation, false), { once: true });
 
   try {
-    const blob = await requestGeneratedImage(text, engine, getImageAspect(), generation);
+    const blob = await requestGeneratedImage(text, getImageAspect(), generation);
     assertGenerationActive(generation);
     if (!blob.type.startsWith("image/")) throw new Error("Image service returned an unsupported response.");
     if (blob.size > 20 * 1024 * 1024) throw new Error("Generated image is larger than the 20 MB safety limit.");
@@ -671,7 +622,6 @@ async function generateImage(prompt, displayedRequest = prompt) {
         generation.objectUrl = null;
       }
       showImageTerminal(generation, "Image generation failed", true);
-      if (error?.code === "missing_stability_key") openModal();
       if (error?.name !== "AbortError") toast(error.message || "Image generation failed.", "error", 10000);
     }
   } finally {

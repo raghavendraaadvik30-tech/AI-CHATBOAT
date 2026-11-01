@@ -117,11 +117,6 @@
         <small>Primary voice for Indian languages (Kannada, Hindi, Tamil, Telugu, Malayalam…). Best used via the Node proxy with SARVAM_API_KEY.</small>
       </label>
       <label class="field">
-        <span>Stability AI API key</span>
-        <input id="stabilityApiKey" type="password" placeholder="sk-…" autocomplete="off" />
-        <small>Optional browser fallback. Recommended: run the Node proxy with STABILITY_API_KEY so the key stays server-side and CORS cannot block generation.</small>
-      </label>
-      <label class="field">
         <span>Model</span>
         <input id="model" type="text" placeholder="openai/gpt-4o-mini" />
       </label>
@@ -159,13 +154,6 @@
         <small>Used when browser speech is selected or neural speech is unavailable.</small>
       </label>
       <label class="field">
-        <span>Image quality</span>
-        <select id="imageEngineSelect">
-          <option value="core">Stable Image Core (fast)</option>
-          <option value="ultra">Stable Image Ultra (highest quality)</option>
-        </select>
-      </label>
-      <label class="field">
         <span>Image aspect ratio</span>
         <select id="imageAspectSelect">
           <option value="1:1">Square · 1:1</option>
@@ -190,7 +178,7 @@
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
   <!-- 3D avatar engine, followed by app coordinator -->
-  <script type="module" src="avatar3d.js?v=16"></script>
-  <script type="module" src="app.js?v=16"></script>
+  <script type="module" src="avatar3d.js?v=17"></script>
+  <script type="module" src="app.js?v=17"></script>
 </body>
 </html>

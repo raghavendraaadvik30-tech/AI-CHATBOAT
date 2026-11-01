@@ -10,7 +10,6 @@ const MAX_JSON_BYTES = 32 * 1024;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 const SARVAM_LANGS = new Set(["en-IN", "hi-IN", "bn-IN", "kn-IN", "ml-IN", "mr-IN", "od-IN", "pa-IN", "ta-IN", "te-IN", "gu-IN"]);
-const ENGINES = new Set(["core", "ultra"]);
 const ASPECTS = new Set(["1:1", "16:9", "9:16", "4:3", "3:4"]);
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -90,7 +89,7 @@ function cloudflareConfigured() {
   return Boolean(process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ACCOUNT_ID);
 }
 
-// Cloudflare Workers AI text-to-image (used when no Stability key is set).
+// Cloudflare Workers AI text-to-image.
 async function handleCloudflareImage(req, res, body) {
   const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
   const aspectRatio = ASPECTS.has(body.aspectRatio) ? body.aspectRatio : "1:1";
@@ -158,67 +157,10 @@ async function handleImage(req, res) {
   if (!String(req.headers["content-type"] || "").startsWith("application/json")) {
     return json(res, 415, { error: "Expected application/json" });
   }
-
-  const key = process.env.STABILITY_API_KEY;
-  if (!key && !cloudflareConfigured()) {
+  if (!cloudflareConfigured()) {
     return json(res, 503, { error: "Image proxy is not configured", code: "image_proxy_unconfigured" });
   }
-
-  const body = await readJson(req);
-  if (!key) return handleCloudflareImage(req, res, body);
-  const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
-  const engine = ENGINES.has(body.engine) ? body.engine : "core";
-  const aspectRatio = ASPECTS.has(body.aspectRatio) ? body.aspectRatio : "1:1";
-  if (!prompt) return json(res, 400, { error: "Prompt is required" });
-  if (prompt.length > 4000) return json(res, 400, { error: "Prompt must be 4000 characters or fewer" });
-
-  const controller = new AbortController();
-  const timeoutMs = engine === "ultra" ? 165_000 : 105_000;
-  const timeout = setTimeout(() => controller.abort(new Error("upstream timeout")), timeoutMs);
-  const abortOnClose = () => { if (!res.writableEnded) controller.abort(new Error("client disconnected")); };
-  res.on("close", abortOnClose);
-
-  try {
-    const form = new FormData();
-    form.append("prompt", prompt);
-    form.append("aspect_ratio", aspectRatio);
-    form.append("output_format", "png");
-
-    const upstream = await fetch(`https://api.stability.ai/v2beta/stable-image/generate/${engine}`, {
-      method: "POST",
-      signal: controller.signal,
-      headers: { Authorization: `Bearer ${key}`, Accept: "image/*" },
-      body: form,
-    });
-
-    if (!upstream.ok) {
-      const errorBody = await readLimited(upstream, 256 * 1024);
-      const detail = errorBody.toString("utf8").slice(0, 500);
-      return json(res, upstream.status, { error: "Stability AI rejected the request", detail });
-    }
-
-    const contentType = String(upstream.headers.get("content-type") || "").split(";")[0];
-    if (!contentType.startsWith("image/")) return json(res, 502, { error: "Stability AI returned a non-image response" });
-    const declared = Number(upstream.headers.get("content-length") || 0);
-    if (declared > MAX_IMAGE_BYTES) return json(res, 502, { error: "Generated image exceeds the size limit" });
-
-    const image = await readLimited(upstream, MAX_IMAGE_BYTES);
-    res.writeHead(200, secureHeaders({
-      "Content-Type": contentType,
-      "Content-Length": image.length,
-      "Cache-Control": "no-store",
-    }));
-    res.end(image);
-  } catch (error) {
-    if (controller.signal.aborted) {
-      if (!res.headersSent && !res.destroyed) json(res, 504, { error: "Image generation timed out or was cancelled" });
-      return;
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-    res.off("close", abortOnClose);
-  }
+  return handleCloudflareImage(req, res, await readJson(req));
 }
 
 async function handleSarvamSpeech(req, res) {
@@ -316,11 +258,11 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.url?.split("?")[0] === "/api/capabilities") {
       return json(res, 200, {
-        imageProxy: Boolean(process.env.STABILITY_API_KEY) || cloudflareConfigured(),
+        imageProxy: cloudflareConfigured(),
         sarvamProxy: Boolean(process.env.SARVAM_API_KEY),
       });
     }
-    if (req.url?.split("?")[0] === "/api/stability/generate") return await handleImage(req, res);
+    if (req.url?.split("?")[0] === "/api/image/generate") return await handleImage(req, res);
     if (req.url?.split("?")[0] === "/api/sarvam/speech") return await handleSarvamSpeech(req, res);
     return await serveStatic(req, res);
   } catch (error) {
@@ -331,8 +273,6 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`Aria running at http://${HOST}:${PORT}`);
-  console.log(process.env.STABILITY_API_KEY ? "Stability proxy enabled"
-    : cloudflareConfigured() ? "Cloudflare Workers AI image proxy enabled"
-    : "Image proxy disabled (set STABILITY_API_KEY or CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID)");
+  console.log(cloudflareConfigured() ? "Cloudflare Workers AI image proxy enabled" : "Image proxy disabled (set CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID)");
   console.log(process.env.SARVAM_API_KEY ? "Sarvam speech proxy enabled" : "Sarvam speech proxy disabled (set SARVAM_API_KEY or use browser fallback)");
 });
