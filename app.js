@@ -90,6 +90,7 @@ const sarvamApiKeyInput = el("sarvamApiKey");
 const avatarModelInput = el("avatarModel");
 const skinToneSelect = el("skinToneSelect");
 const browsSelect = el("browsSelect");
+const catEyeSelect = el("catEyeSelect");
 const modelInput = el("model");
 const personaInput = el("persona");
 const voiceSelect = el("voiceSelect");
@@ -265,6 +266,7 @@ function loadSettings() {
   avatarModelInput.value = store.get(AVATAR_MODEL_STORE) || "";
   skinToneSelect.value = store.get("aria.skinTone") || "wheatish";
   browsSelect.value = store.get("aria.brows") === "off" ? "off" : "on";
+  catEyeSelect.value = store.get("aria.catEye") === "off" ? "off" : "on";
   populateVoices();
 }
 
@@ -309,6 +311,7 @@ saveBtn.addEventListener("click", () => {
   store.set(TTS_MODEL_STORE, ttsModelInput.value.trim() || DEFAULT_TTS_MODEL);
   store.set(IMAGE_ASPECT_STORE, imageAspectSelect.value || "1:1");
   window.ariaAvatar?.setSkinTone?.(skinToneSelect.value || "wheatish");
+  window.ariaAvatar?.setCatEye?.(catEyeSelect.value !== "off");
   window.ariaAvatar?.setBrows?.(browsSelect.value !== "off");
   const modelUrl = avatarModelInput.value.trim();
   if (!modelUrl || /^https:\/\/|^\.?\.?\//.test(modelUrl)) store.set(AVATAR_MODEL_STORE, modelUrl);

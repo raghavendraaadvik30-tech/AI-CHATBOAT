@@ -603,6 +603,13 @@ new GLTFLoader()
         }
       }
       for (const n of MOUTH_NAMES) { const i = idx(n); if (i >= 0) mouthIdx.add(i); }
+      // Scans often share ONE material between head, eyes and teeth. Give every
+      // part its own copy so skin colour / brow paint never touch the eyes.
+      faceRoot.traverse((o) => {
+        if (!o.isMesh || !o.material) return;
+        o.material = Array.isArray(o.material) ? o.material.map((m) => m.clone()) : o.material.clone();
+      });
+      try { eyeMeshes = detectEyes(); } catch (error) { eyeMeshes = []; reportAvatarError("eye detection", error); }
       baseRot.copy(faceRoot.rotation);
       basePos.copy(faceRoot.position);
       try { frameFace(); } catch (error) { reportAvatarError("framing", error); }
@@ -640,24 +647,59 @@ function findMorphMesh(root) {
 // Darkens the skin's own vertices in the brow area, located from the real eye
 // positions in world space. Nothing is added on top of the face, so the brows
 // can never float or smear, and they move with every expression automatically.
-function isEyeMesh(o) { return !!o && o.isMesh && o !== head && /eye/i.test(o.name || "") && !/lash|brow/i.test(o.name || ""); }
+let eyeMeshes = [];
+function isEyeMesh(o) { return eyeMeshes.includes(o); }
+
+// Finds the two eyeballs: by name when the model names them, otherwise by shape —
+// a matched left/right pair of small parts in the upper front of the face.
+function detectEyes() {
+  faceRoot.updateMatrixWorld(true);
+  const parts = [];
+  faceRoot.traverse((o) => {
+    if (!o.isMesh || o === head) return;
+    const box = new THREE.Box3().setFromObject(o), size = box.getSize(new THREE.Vector3());
+    parts.push({ o, c: box.getCenter(new THREE.Vector3()), r: Math.max(size.x, size.y, size.z) / 2, name: o.name || "" });
+  });
+  const named = parts.filter((p) => /eye/i.test(p.name) && !/lash|brow|lid/i.test(p.name));
+  if (named.length >= 2) return pickPair(named);
+  const hb = new THREE.Box3().setFromObject(head), hs = hb.getSize(new THREE.Vector3()), hc = hb.getCenter(new THREE.Vector3());
+  const candidates = parts.filter((p) =>
+    p.r > 0 && p.r < hs.x * 0.16 &&                       // small
+    p.c.y > hc.y - hs.y * 0.05 && p.c.y < hb.max.y &&     // upper half of the face
+    p.c.z > hc.z &&                                       // front half
+    Math.abs(p.c.x - hc.x) > hs.x * 0.06 && Math.abs(p.c.x - hc.x) < hs.x * 0.4 &&
+    !/teeth|tooth|tongue|gum/i.test(p.name));
+  return pickPair(candidates);
+}
+function pickPair(list) {
+  let best = null, bestScore = Infinity;
+  for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+    const a = list[i], b = list[j];
+    if (Math.sign(a.c.x - b.c.x) === 0) continue;
+    // mirrored pair: same height, same size, on opposite sides
+    const score = Math.abs(a.c.y - b.c.y) / a.r + Math.abs(a.r - b.r) / a.r + Math.abs(a.c.z - b.c.z) / a.r;
+    if (score < bestScore && score < 0.9) { bestScore = score; best = [a.o, b.o]; }
+  }
+  return best || [];
+}
 
 let browsOn = true;
 try { browsOn = localStorage.getItem("aria.brows") !== "off"; } catch {}
-const BROW_TINT = [0.3, 0.24, 0.21];   // multiplies the skin colour -> dark brown brow
-const LID_TINT = [0.62, 0.56, 0.54];   // very soft upper lash line
+const BROW_TINT = [0.24, 0.18, 0.15];  // multiplies the skin colour -> dark brown brow
+const LID_TINT = [0.18, 0.15, 0.14];   // dark lash line / cat-eye liner
+let catEye = true;
+try { catEye = localStorage.getItem("aria.catEye") !== "off"; } catch {}
 
 function browWeights() {
   const pos = head.geometry.attributes.position, nor = head.geometry.attributes.normal;
   if (!pos || !nor) return null;
   faceRoot.updateMatrixWorld(true);
   const eyes = [];
-  faceRoot.traverse((o) => {
-    if (!isEyeMesh(o)) return;
+  for (const o of eyeMeshes) {
     const box = new THREE.Box3().setFromObject(o), size = box.getSize(new THREE.Vector3());
     const r = Math.max(size.x, size.y, size.z) / 2;
     if (r > 0 && Number.isFinite(r)) eyes.push({ c: box.getCenter(new THREE.Vector3()), r });
-  });
+  }
   if (eyes.length < 2) return null;
   eyes.sort((a, b) => a.c.x - b.c.x);
   const pair = [eyes[0], eyes[eyes.length - 1]];
@@ -684,15 +726,24 @@ function browWeights() {
         const arch = t < 0.65 ? 0.32 * Math.sin((Math.max(0, t) / 0.65) * Math.PI / 2) : 0.32 - 0.62 * Math.pow((t - 0.65) / 0.35, 1.3);
         const line = c.y + r * (1.72 + arch);
         const half = r * (0.3 * Math.pow(1 - Math.min(1, Math.max(0, t)), 0.6) + 0.12);
-        const across = 1 - smooth(half * 0.55, half, Math.abs(p.y - line));
+        const across = 1 - smooth(half * 0.5, half * 1.1, Math.abs(p.y - line));
         const along = smooth(-0.12, 0.06, t) * (1 - smooth(0.85, 1.12, t));
         brow[i] = Math.max(brow[i], across * along);
       }
-      // soft upper lash line just above the eye opening
-      const dx = (p.x - c.x) / (r * 1.05);
+      // upper lash line along the eye opening, thickening toward the outer corner
+      const dx = (p.x - c.x) / (r * 1.05), out = -inward * dx;  // out > 0 toward the temple
       if (Math.abs(dx) < 1) {
         const lidY = c.y + r * (0.06 + 0.42 * (1 - dx * dx)); // follows the eye opening: corners -> top of the lid
-        const w = (1 - smooth(r * 0.06, r * 0.16, Math.abs(p.y - lidY))) * (1 - smooth(0.75, 1, Math.abs(dx)));
+        const thick = r * (0.07 + 0.07 * Math.max(0, out));
+        const w = (1 - smooth(thick, thick * 2.2, Math.abs(p.y - lidY))) * (1 - smooth(0.8, 1, Math.abs(dx)) * (out > 0 ? 0 : 1));
+        lid[i] = Math.max(lid[i], w);
+      }
+      // "cat-eye" wing: a short tapered flick from the outer corner up toward the brow tail
+      if (catEye && out >= 0.85 && out < 1.5) {
+        const k = (out - 0.85) / 0.65;                         // 0 at the corner -> 1 at the tip
+        const wingY = c.y + r * (0.1 + 0.42 * k);
+        const thick = r * 0.1 * (1 - k) + r * 0.015;
+        const w = (1 - smooth(thick, thick * 2, Math.abs(p.y - wingY))) * (1 - smooth(0.75, 1, k));
         lid[i] = Math.max(lid[i], w);
       }
     }
@@ -700,7 +751,9 @@ function browWeights() {
   let count = 0;
   for (let i = 0; i < brow.length; i++) if (brow[i] > 0.05) count++;
   // sanity: a brow is a small patch of the face, never a large area
-  if (count === 0 || count > pos.count * 0.08) return null;
+  let lidCount = 0;
+  for (let i = 0; i < lid.length; i++) if (lid[i] > 0.05) lidCount++;
+  if (count === 0 || count > pos.count * 0.08 || lidCount > pos.count * 0.05) return null;
   return { brow, lid, count };
 }
 
@@ -715,8 +768,8 @@ function applyBrows(on) {
     if (w) {
       for (let i = 0; i < count; i++) {
         for (let k = 0; k < 3; k++) {
-          const b = 1 + (BROW_TINT[k] - 1) * w.brow[i] * 0.95;
-          const l = 1 + (LID_TINT[k] - 1) * w.lid[i] * 0.55;
+          const b = 1 + (BROW_TINT[k] - 1) * w.brow[i];
+          const l = 1 + (LID_TINT[k] - 1) * w.lid[i] * 0.85;
           colors[i * 3 + k] = Math.min(b, l);
         }
       }
@@ -775,9 +828,11 @@ function frameFace() {
           m.color?.copy?.(skinBase);
         } else if (isEyeMesh(o) && "roughness" in m) {
           // moist, glossy eyes: reflections + catchlight make them look alive
-          m.roughness = 0.07;
+          m.roughness = 0.12;
           m.metalness = 0;
-          if ("envMapIntensity" in m) m.envMapIntensity = 1.7;
+          m.vertexColors = false;
+          m.color?.set?.(0xffffff);
+          if ("envMapIntensity" in m) m.envMapIntensity = 1.6;
         }
         m.needsUpdate = true;
       }
@@ -1141,6 +1196,11 @@ window.ariaAvatar = {
   setLanguage(language) { preferredLanguage = language || "en-IN"; },
   setSkinTone(name) { setSkinTone(name); },
   setBrows(on) { try { applyBrows(on); } catch (error) { reportAvatarError("brows", error); } },
+  setCatEye(on) {
+    catEye = !!on;
+    try { localStorage.setItem("aria.catEye", catEye ? "on" : "off"); } catch {}
+    try { applyBrows(browsOn); } catch (error) { reportAvatarError("brows", error); }
+  },
   setPhase(next) {
     thinking = next === "thinking";
     listening = next === "listening";
