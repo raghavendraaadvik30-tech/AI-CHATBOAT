@@ -20,6 +20,7 @@
 html, body {
   margin: 0;
   height: 100%;
+  min-height: 100dvh;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: var(--text);
   background: radial-gradient(1200px 800px at 20% -10%, #241a5e 0%, var(--bg-1) 40%, var(--bg-0) 100%);
@@ -27,12 +28,14 @@ html, body {
 }
 
 /* ---------- floating background orbs ---------- */
-.bg-orbs { position: fixed; inset: 0; overflow: hidden; z-index: 0; }
+.bg-orbs { position: fixed; inset: 0; overflow: hidden; z-index: 0; pointer-events: none; }
 .orb {
   position: absolute;
   border-radius: 50%;
-  filter: blur(60px);
-  opacity: 0.5;
+  filter: blur(40px);
+  opacity: 0.45;
+  will-change: transform;
+  transform: translateZ(0);
   animation: drift 18s ease-in-out infinite;
 }
 .orb-1 { width: 360px; height: 360px; background: #8b5cf6; top: -80px; left: -60px; }
@@ -47,7 +50,8 @@ html, body {
 .app {
   position: relative;
   z-index: 1;
-  height: 100%;
+  height: 100vh;
+  height: 100dvh;
   display: grid;
   grid-template-columns: 1fr 1fr;
   max-width: 1200px;
@@ -61,9 +65,16 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: safe center;
   position: relative;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0 12px;
+  scrollbar-width: none;
 }
+.stage::-webkit-scrollbar { display: none; }
+.stage > * { flex-shrink: 0; }
 .avatar-glow {
   position: absolute;
   top: 42%;
@@ -83,7 +94,7 @@ html, body {
   position: relative;
   width: 100%;
   max-width: 440px;
-  height: 480px;
+  height: clamp(240px, 50vh, 480px);
   display: grid;
   place-items: center;
   border-radius: 26px;
@@ -237,6 +248,7 @@ body[data-phase="speaking"] .voice-wave span:nth-child(5) { animation-delay: -.1
 
 /* ---------- chat panel ---------- */
 .chat {
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--panel);
@@ -310,7 +322,10 @@ body[data-phase="speaking"] .voice-wave span:nth-child(5) { animation-delay: -.1
 
 .messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 22px;
   display: flex;
   flex-direction: column;
@@ -553,11 +568,17 @@ body[data-phase="speaking"] .voice-wave span:nth-child(5) { animation-delay: -.1
 
 /* ---------- responsive ---------- */
 @media (max-width: 900px) {
-  html, body { overflow: auto; }
-  .app { grid-template-columns: 1fr; height: auto; min-height: 100%; }
-  .stage { padding: 20px 0; }
+  html { height: auto; overflow-x: hidden; overflow-y: auto; }
+  body { height: auto; min-height: 100dvh; overflow-x: hidden; overflow-y: visible; }
+  .app { grid-template-columns: 1fr; height: auto; min-height: 100dvh; padding: 16px; gap: 18px; }
+  .stage { overflow: visible; padding: 12px 0 4px; justify-content: flex-start; }
   .avatar-canvas { height: 320px; }
-  .chat { height: 70vh; min-height: 480px; }
+  .chat { height: 75vh; height: 75dvh; min-height: 460px; }
+  /* heavy effects off on phones so scrolling stays smooth */
+  .bg-orbs { position: absolute; }
+  .orb { filter: blur(30px); animation: none; }
+  .chat { backdrop-filter: none; background: rgba(28, 22, 70, 0.7); }
+  .avatar-name, .brand-company { animation: none; }
 }
 
 /* ---------- brand credit (Code Origin.AI) ---------- */
@@ -658,4 +679,8 @@ body[data-phase="speaking"] .voice-wave span:nth-child(5) { animation-delay: -.1
 
 @media (max-width: 900px) {
   .brand-credit { margin-top: 12px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
