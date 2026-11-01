@@ -82,6 +82,76 @@ function sameOrigin(req) {
   catch { return false; }
 }
 
+const CF_DIMENSIONS = {
+  "1:1": [1024, 1024], "16:9": [1344, 768], "9:16": [768, 1344], "4:3": [1152, 896], "3:4": [896, 1152],
+};
+
+function cloudflareConfigured() {
+  return Boolean(process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ACCOUNT_ID);
+}
+
+// Cloudflare Workers AI text-to-image (used when no Stability key is set).
+async function handleCloudflareImage(req, res, body) {
+  const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+  const aspectRatio = ASPECTS.has(body.aspectRatio) ? body.aspectRatio : "1:1";
+  if (!prompt) return json(res, 400, { error: "Prompt is required" });
+  if (prompt.length > 2048) return json(res, 400, { error: "Prompt must be 2048 characters or fewer" });
+
+  const model = process.env.CLOUDFLARE_IMAGE_MODEL || "@cf/black-forest-labs/flux-1-schnell";
+  const isFlux = model.includes("flux");
+  const [width, height] = CF_DIMENSIONS[aspectRatio];
+  const payload = isFlux ? { prompt, steps: 6 } : { prompt, width, height };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error("upstream timeout")), 105_000);
+  const abortOnClose = () => { if (!res.writableEnded) controller.abort(new Error("client disconnected")); };
+  res.on("close", abortOnClose);
+
+  try {
+    const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(process.env.CLOUDFLARE_ACCOUNT_ID)}/ai/run/${model}`;
+    const upstream = await fetch(url, {
+      method: "POST",
+      signal: controller.signal,
+      headers: { Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const raw = await readLimited(upstream, MAX_IMAGE_BYTES * 2);
+    const type = String(upstream.headers.get("content-type") || "");
+    if (!upstream.ok) {
+      return json(res, upstream.status, { error: "Cloudflare rejected the request", detail: raw.toString("utf8").slice(0, 500) });
+    }
+
+    let image, contentType = "image/png";
+    if (type.startsWith("image/")) {
+      image = raw; contentType = type.split(";")[0];
+    } else {
+      let b64;
+      try { b64 = JSON.parse(raw.toString("utf8"))?.result?.image; } catch { b64 = null; }
+      if (!b64) return json(res, 502, { error: "Cloudflare returned no image data" });
+      image = Buffer.from(b64, "base64");
+      if (image[0] === 0xff && image[1] === 0xd8) contentType = "image/jpeg";
+    }
+    if (image.length > MAX_IMAGE_BYTES) return json(res, 502, { error: "Generated image exceeds the size limit" });
+
+    res.writeHead(200, secureHeaders({
+      "Content-Type": contentType,
+      "Content-Length": image.length,
+      "Cache-Control": "no-store",
+    }));
+    res.end(image);
+  } catch (error) {
+    if (controller.signal.aborted) {
+      if (!res.headersSent && !res.destroyed) json(res, 504, { error: "Image generation timed out or was cancelled" });
+      return;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    res.off("close", abortOnClose);
+  }
+}
+
 async function handleImage(req, res) {
   if (req.method !== "POST") return json(res, 405, { error: "Method not allowed" });
   if (!sameOrigin(req)) return json(res, 403, { error: "Cross-origin requests are not allowed" });
@@ -90,9 +160,12 @@ async function handleImage(req, res) {
   }
 
   const key = process.env.STABILITY_API_KEY;
-  if (!key) return json(res, 503, { error: "Image proxy is not configured", code: "image_proxy_unconfigured" });
+  if (!key && !cloudflareConfigured()) {
+    return json(res, 503, { error: "Image proxy is not configured", code: "image_proxy_unconfigured" });
+  }
 
   const body = await readJson(req);
+  if (!key) return handleCloudflareImage(req, res, body);
   const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
   const engine = ENGINES.has(body.engine) ? body.engine : "core";
   const aspectRatio = ASPECTS.has(body.aspectRatio) ? body.aspectRatio : "1:1";
@@ -243,7 +316,7 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.url?.split("?")[0] === "/api/capabilities") {
       return json(res, 200, {
-        imageProxy: Boolean(process.env.STABILITY_API_KEY),
+        imageProxy: Boolean(process.env.STABILITY_API_KEY) || cloudflareConfigured(),
         sarvamProxy: Boolean(process.env.SARVAM_API_KEY),
       });
     }
@@ -258,6 +331,8 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`Aria running at http://${HOST}:${PORT}`);
-  console.log(process.env.STABILITY_API_KEY ? "Stability proxy enabled" : "Stability proxy disabled (set STABILITY_API_KEY or use browser fallback)");
+  console.log(process.env.STABILITY_API_KEY ? "Stability proxy enabled"
+    : cloudflareConfigured() ? "Cloudflare Workers AI image proxy enabled"
+    : "Image proxy disabled (set STABILITY_API_KEY or CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID)");
   console.log(process.env.SARVAM_API_KEY ? "Sarvam speech proxy enabled" : "Sarvam speech proxy disabled (set SARVAM_API_KEY or use browser fallback)");
 });
