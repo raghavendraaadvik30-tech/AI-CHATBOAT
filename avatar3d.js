@@ -601,15 +601,17 @@ new GLTFLoader()
       for (const n of MOUTH_NAMES) { const i = idx(n); if (i >= 0) mouthIdx.add(i); }
       baseRot.copy(faceRoot.rotation);
       basePos.copy(faceRoot.position);
-      frameFace();
-      enhanceFace(); // realistic eyes (guarded: never breaks the avatar)
+      try { frameFace(); } catch (error) { reportAvatarError("framing", error); }
+      // show the face first; optional upgrades come afterwards and can never hide it
       if (loaderEl) loaderEl.remove();
       container.classList.add("ready"); // trigger CSS fade-in
       resize();
+      try { enhanceFace(); } catch (error) { reportAvatarError("eyes/brows", error); }
     },
     (ev) => { if (ev.total) setLoader(`Loading Aria… ${Math.round((ev.loaded / ev.total) * 100)}%`); },
     (err) => {
       console.error("Avatar load failed:", err);
+      reportAvatarError("model download", err);
       if (customModelUrl) {
         // a bad custom model must never leave the page without an avatar
         try { localStorage.removeItem("aria.avatarModel"); } catch {}
@@ -951,6 +953,10 @@ function frameFace() {
   camera.lookAt(center.x, center.y, center.z);
   camBase.copy(camera.position);
   lookAt.set(center.x, center.y, center.z);
+  // clipping planes scale with the model so it can never be cut away
+  camera.near = Math.max(0.001, dist / 200);
+  camera.far = Math.max(50, dist * 60);
+  camera.updateProjectionMatrix();
 
   const poreBump = makePoreTexture();
 
@@ -1025,7 +1031,7 @@ const MANAGED = [
   "eyeLookIn_R", "eyeLookOut_R", "eyeLookUp_R", "eyeLookDown_R",
 ];
 
-function animate() {
+function updateScene() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
 
@@ -1270,7 +1276,29 @@ function animate() {
   const tint = talking ? RIM_SPEAK : listening ? RIM_LISTEN : thinking ? RIM_THINK : RIM_IDLE;
   rimLight.color.lerp(tint, Math.min(1, dt * 3));
 
-  composer.render();
+}
+
+// The render call is isolated from all animation logic: no optional feature
+// (brows, glow, blush, extras) can ever leave the canvas black.
+const reported = new Set();
+function reportAvatarError(where, error) {
+  const key = `${where}:${error?.message}`;
+  if (reported.has(key)) return;            // log each distinct problem once, not 60x per second
+  reported.add(key);
+  console.error(`Aria avatar (${where}):`, error);
+  window.dispatchEvent(new CustomEvent("aria-avatar-error", { detail: `${where}: ${error?.message || error}` }));
+}
+let useComposer = true;
+function animate() {
+  try { updateScene(); } catch (error) { reportAvatarError("animation", error); }
+  try {
+    if (useComposer) composer.render();
+    else renderer.render(scene, camera);
+  } catch (error) {
+    reportAvatarError("post-processing", error);
+    useComposer = false; // plain rendering still shows the face
+    try { renderer.render(scene, camera); } catch (inner) { reportAvatarError("render", inner); }
+  }
 }
 renderer.setAnimationLoop(animate);
 

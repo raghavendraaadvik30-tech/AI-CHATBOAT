@@ -332,6 +332,10 @@ saveBtn.addEventListener("click", () => {
 
 try { window.speechSynthesis?.addEventListener?.("voiceschanged", populateVoices); } catch {}
 window.addEventListener("aria-avatar-ready", syncAvatarSettings);
+// Surface avatar problems on screen (once each) instead of failing silently.
+window.addEventListener("aria-avatar-error", (event) => {
+  toast(`Avatar issue: ${event.detail}. The chat still works — try Ctrl+Shift+R, or turn off Eyebrows/Eyelashes in Settings.`, "error", 12000);
+});
 window.addEventListener("aria-speech-error", (event) => {
   toast(event.detail || "Speech playback failed.", "error", 10000);
 });
@@ -1243,20 +1247,6 @@ toBottomBtn?.addEventListener("click", () => {
   messagesBox.scrollTo({ top: messagesBox.scrollHeight, behavior: "smooth" });
 });
 new MutationObserver(updateToBottom).observe(messagesBox, { childList: true, subtree: true });
-
-// Gentle 3D tilt of the avatar card toward the pointer.
-const avatarCard = el("avatarCanvas");
-if (avatarCard && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
-  let tiltFrame = 0;
-  window.addEventListener("pointermove", (event) => {
-    if (tiltFrame) return;
-    tiltFrame = requestAnimationFrame(() => {
-      tiltFrame = 0;
-      avatarCard.style.setProperty("--tx", ((event.clientX / innerWidth) * 2 - 1).toFixed(3));
-      avatarCard.style.setProperty("--ty", ((event.clientY / innerHeight) * 2 - 1).toFixed(3));
-    });
-  }, { passive: true });
-}
 
 // Escape closes the settings dialog.
 document.addEventListener("keydown", (event) => {
