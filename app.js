@@ -520,6 +520,9 @@ async function requestGeneratedImage(prompt, aspectRatio, generation) {
   if (response.status === 503 && body.code === "image_proxy_unconfigured") {
     throw new Error("Image generation is not configured. Set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN on the server.");
   }
+  if (response.status === 404 || response.status === 405 || response.status === 501) {
+    throw new Error("Image proxy not found. Stop `python -m http.server` and run `npm start` (Node server) instead, with CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN set.");
+  }
   throw new Error(`Image proxy ${response.status}: ${body.detail || body.error || "request failed"}`);
 }
 
