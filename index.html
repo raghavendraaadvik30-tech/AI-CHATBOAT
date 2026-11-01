@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <meta name="theme-color" content="#0d0b1f" />
-  <link rel="stylesheet" href="style.css?v=25" />
+  <link rel="stylesheet" href="style.css?v=26" />
 
   <!-- Three.js via import map (jsDelivr: reliable CORS + binary assets) -->
   <script type="importmap">
@@ -207,34 +207,6 @@
         <input id="avatarModel" type="text" placeholder="https://…/my-avatar.glb" autocomplete="off" />
         <small>Advanced: a .glb with ARKit face blendshapes (e.g. a MetaHuman, Avaturn or Reallusion export) for a more photoreal face. Leave empty for the built-in face. Reload the page after saving.</small>
       </label>
-      <label class="field">
-        <span>Hair style</span>
-        <select id="hairStyleSelect">
-          <option value="short">Short</option>
-          <option value="medium">Medium</option>
-          <option value="none">None (bald)</option>
-        </select>
-      </label>
-      <label class="field">
-        <span>Hair colour</span>
-        <select id="hairColorSelect">
-          <option value="black">Black</option>
-          <option value="darkbrown">Dark brown</option>
-          <option value="brown">Brown</option>
-          <option value="auburn">Auburn</option>
-          <option value="blonde">Blonde</option>
-          <option value="grey">Grey</option>
-        </select>
-      </label>
-      <label class="field">
-        <span>Hair coverage</span>
-        <select id="hairCoverSelect">
-          <option value="less">Less (higher hairline)</option>
-          <option value="normal">Normal</option>
-          <option value="more">More (lower hairline)</option>
-        </select>
-        <small>If hair sits too low or too high on your face, change this.</small>
-      </label>
       <h3 class="modal-section">5 · Personality</h3>
       <label class="field">
         <span>Personality (system prompt)</span>
@@ -251,7 +223,7 @@
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
   <!-- 3D avatar engine, followed by app coordinator -->
-  <script type="module" src="avatar3d.js?v=25"></script>
-  <script type="module" src="app.js?v=25"></script>
+  <script type="module" src="avatar3d.js?v=26"></script>
+  <script type="module" src="app.js?v=26"></script>
 </body>
 </html>

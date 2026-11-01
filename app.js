@@ -88,9 +88,6 @@ const modal = el("modal");
 const apiKeyInput = el("apiKey");
 const sarvamApiKeyInput = el("sarvamApiKey");
 const avatarModelInput = el("avatarModel");
-const hairStyleSelect = el("hairStyleSelect");
-const hairColorSelect = el("hairColorSelect");
-const hairCoverSelect = el("hairCoverSelect");
 const modelInput = el("model");
 const personaInput = el("persona");
 const voiceSelect = el("voiceSelect");
@@ -135,7 +132,7 @@ const store = {
 };
 
 function removeRetiredProviderData() {
-  ["aria.googleApiKey", "aria.googleTtsModel", "aria.sonexApiKey", "aria.sonexVoiceId", "aria.stabilityApiKey", "aria.imageEngine"]
+  ["aria.googleApiKey", "aria.googleTtsModel", "aria.sonexApiKey", "aria.sonexVoiceId", "aria.stabilityApiKey", "aria.imageEngine", "aria.hairStyle", "aria.hairColor", "aria.hairCover"]
     .forEach((key) => store.remove(key));
   if ((store.get(TTS_MODEL_STORE) || "").startsWith("google/")) {
     store.set(TTS_MODEL_STORE, DEFAULT_TTS_MODEL);
@@ -264,9 +261,6 @@ function loadSettings() {
   ttsModelInput.value = getTtsModel();
   imageAspectSelect.value = getImageAspect();
   avatarModelInput.value = store.get(AVATAR_MODEL_STORE) || "";
-  hairStyleSelect.value = store.get("aria.hairStyle") || "short";
-  hairColorSelect.value = store.get("aria.hairColor") || "darkbrown";
-  hairCoverSelect.value = store.get("aria.hairCover") || "normal";
   populateVoices();
 }
 
@@ -310,7 +304,6 @@ saveBtn.addEventListener("click", () => {
   store.set(TTS_MODE_STORE, ["auto", "browser", "openrouter", "sarvam"].includes(ttsModeSelect.value) ? ttsModeSelect.value : "auto");
   store.set(TTS_MODEL_STORE, ttsModelInput.value.trim() || DEFAULT_TTS_MODEL);
   store.set(IMAGE_ASPECT_STORE, imageAspectSelect.value || "1:1");
-  window.ariaAvatar?.setHair?.(hairStyleSelect.value || "short", hairColorSelect.value || "darkbrown", hairCoverSelect.value || "normal");
   const modelUrl = avatarModelInput.value.trim();
   if (!modelUrl || /^https:\/\/|^\.?\.?\//.test(modelUrl)) store.set(AVATAR_MODEL_STORE, modelUrl);
   else toast("Avatar model URL must start with https:// — it was not saved.", "error", 6000);
