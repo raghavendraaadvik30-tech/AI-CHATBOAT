@@ -807,7 +807,7 @@ function buildFaceDetails() {
 
   // samples: [{x, yBot, yTop, liftBot, liftTop}] ordered along the ribbon
   const addStrip = (samples, texture, color, order) => {
-    const K = samples.length, p = new Float32Array(K * 2 * 3), uv = new Float32Array(K * 2 * 2), idx = [];
+    const K = samples.length, p = new Float32Array(K * 2 * 3), uv = new Float32Array(K * 2 * 2), nrm = new Float32Array(K * 2 * 3), idx = [];
     const vi = new Uint32Array(K * 2), off = new Float32Array(K * 2 * 3);
     samples.forEach((s, i) => {
       [[s.yBot, s.liftBot, 0], [s.yTop, s.liftTop, 1]].forEach(([y, lift, row]) => {
@@ -818,12 +818,18 @@ function buildFaceDetails() {
         off[j * 3 + 2] = nor.getZ(sn.vi) * lift;
         p[j * 3] = pos.getX(sn.vi) + off[j * 3]; p[j * 3 + 1] = pos.getY(sn.vi) + off[j * 3 + 1]; p[j * 3 + 2] = pos.getZ(sn.vi) + off[j * 3 + 2];
         uv[j * 2] = i / (K - 1); uv[j * 2 + 1] = row;
+        // unit normal taken from the skin underneath (never zero, so lighting stays finite)
+        let nx = nor.getX(sn.vi), ny = nor.getY(sn.vi), nz = nor.getZ(sn.vi);
+        const len = Math.hypot(nx, ny, nz);
+        if (!(len > 1e-6)) { nx = 0; ny = 0; nz = 1; } else { nx /= len; ny /= len; nz /= len; }
+        nrm[j * 3] = nx; nrm[j * 3 + 1] = ny; nrm[j * 3 + 2] = nz;
       });
       if (i < K - 1) { const a = i * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
     });
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(p, 3));
     g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    g.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
     g.setIndex(idx);
     const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
       map: texture, color, transparent: true, alphaTest: 0.04, depthWrite: false, roughness: 0.55,
@@ -1289,6 +1295,38 @@ function reportAvatarError(where, error) {
   window.dispatchEvent(new CustomEvent("aria-avatar-error", { detail: `${where}: ${error?.message || error}` }));
 }
 let useComposer = true;
+let healFrame = 0, healStage = 0, healCtx = null;
+
+// Looks at the pixels actually on screen. A pure-black canvas (even the studio
+// backdrop is missing) means the render pipeline produced invalid pixels, so
+// features are switched off step by step until the face appears.
+function canvasIsBlank() {
+  try {
+    if (!healCtx) { const c = document.createElement("canvas"); c.width = c.height = 16; healCtx = c.getContext("2d", { willReadFrequently: true }); }
+    healCtx.drawImage(renderer.domElement, 0, 0, 16, 16);
+    const d = healCtx.getImageData(0, 0, 16, 16).data;
+    let sum = 0;
+    for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i + 1] + d[i + 2];
+    return sum < 16 * 16 * 3 * 1.5; // essentially all black
+  } catch { return false; }
+}
+function healIfBlank() {
+  healFrame++;
+  if (healStage >= 3 || healFrame < 40 || healFrame % 30 !== 0 || healFrame > 400) return;
+  if (!canvasIsBlank()) return;
+  healStage++;
+  if (healStage === 1) {
+    reportAvatarError("blank canvas", new Error("removing eyebrows/eyelashes"));
+    if (faceDetails.group) { head.remove(faceDetails.group); faceDetails.group = null; faceDetails.strips = []; }
+  } else if (healStage === 2) {
+    reportAvatarError("blank canvas", new Error("switching to plain rendering"));
+    useComposer = false;
+  } else {
+    reportAvatarError("blank canvas", new Error("restoring original eyes"));
+    for (const eye of eyeballs) eye.visible = false;
+    scene.traverse((o) => { if (o.isMesh && o !== head && /eye/i.test(o.name || "")) o.visible = true; });
+  }
+}
 function animate() {
   try { updateScene(); } catch (error) { reportAvatarError("animation", error); }
   try {
@@ -1299,6 +1337,7 @@ function animate() {
     useComposer = false; // plain rendering still shows the face
     try { renderer.render(scene, camera); } catch (inner) { reportAvatarError("render", inner); }
   }
+  try { healIfBlank(); } catch {}
 }
 renderer.setAnimationLoop(animate);
 
