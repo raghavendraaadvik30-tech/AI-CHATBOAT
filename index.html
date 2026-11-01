@@ -4,7 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Aria · AI Avatar · Code Origin.AI</title>
-  <link rel="stylesheet" href="style.css?v=22" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <meta name="theme-color" content="#0d0b1f" />
+  <link rel="stylesheet" href="style.css?v=23" />
 
   <!-- Three.js via import map (jsDelivr: reliable CORS + binary assets) -->
   <script type="importmap">
@@ -197,7 +201,13 @@
           <option value="3:4">Classic portrait · 3:4</option>
         </select>
       </label>
-      <h3 class="modal-section">4 · Personality</h3>
+      <h3 class="modal-section">4 · Avatar</h3>
+      <label class="field">
+        <span>Custom avatar model URL (optional)</span>
+        <input id="avatarModel" type="text" placeholder="https://…/my-avatar.glb" autocomplete="off" />
+        <small>Advanced: a .glb with ARKit face blendshapes (e.g. a MetaHuman, Avaturn or Reallusion export) for a more photoreal face. Leave empty for the built-in face. Reload the page after saving.</small>
+      </label>
+      <h3 class="modal-section">5 · Personality</h3>
       <label class="field">
         <span>Personality (system prompt)</span>
         <textarea id="persona" rows="3"></textarea>
@@ -213,7 +223,7 @@
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
   <!-- 3D avatar engine, followed by app coordinator -->
-  <script type="module" src="avatar3d.js?v=22"></script>
-  <script type="module" src="app.js?v=22"></script>
+  <script type="module" src="avatar3d.js?v=23"></script>
+  <script type="module" src="app.js?v=23"></script>
 </body>
 </html>

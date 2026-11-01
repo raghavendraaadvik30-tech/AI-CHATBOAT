@@ -27,7 +27,10 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 
 const BASIS_PATH = "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/basis/";
-const MODEL_URL = "https://cdn.jsdelivr.net/gh/mrdoob/three.js@r160/examples/models/gltf/facecap.glb";
+const DEFAULT_MODEL_URL = "https://cdn.jsdelivr.net/gh/mrdoob/three.js@r160/examples/models/gltf/facecap.glb";
+let customModelUrl = "";
+try { customModelUrl = (localStorage.getItem("aria.avatarModel") || "").trim(); } catch {}
+const MODEL_URL = customModelUrl || DEFAULT_MODEL_URL;
 
 const container = document.getElementById("avatarCanvas");
 const loaderEl = document.getElementById("avatarLoader");
@@ -38,13 +41,13 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setClearColor(0x000000, 0);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 0.98;
 container.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = makeStudioBackdrop(); // opaque gradient -> cohesive + lets bloom work
 
-const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 50);
+const camera = new THREE.PerspectiveCamera(22, 1, 0.1, 50); // long portrait lens
 camera.position.set(0, 0.06, 2.4);
 
 function makeStudioBackdrop() {
@@ -52,15 +55,15 @@ function makeStudioBackdrop() {
   c.width = 32; c.height = 256;
   const ctx = c.getContext("2d");
   const g = ctx.createLinearGradient(0, 0, 0, 256);
-  g.addColorStop(0, "#3a2c6b");
-  g.addColorStop(0.5, "#1b1640");
-  g.addColorStop(1, "#0d0a20");
+  g.addColorStop(0, "#2b2a3a");
+  g.addColorStop(0.5, "#17162a");
+  g.addColorStop(1, "#0b0a16");
   ctx.fillStyle = g; ctx.fillRect(0, 0, 32, 256);
   // warm studio light spill near the top-centre for lifelike skin tones
   const r = ctx.createRadialGradient(16, 64, 0, 16, 64, 160);
-  r.addColorStop(0, "rgba(255,196,150,0.33)");
-  r.addColorStop(0.5, "rgba(170,130,225,0.22)");
-  r.addColorStop(1, "rgba(170,130,225,0)");
+  r.addColorStop(0, "rgba(255,214,184,0.26)");
+  r.addColorStop(0.5, "rgba(150,140,190,0.14)");
+  r.addColorStop(1, "rgba(150,140,190,0)");
   ctx.fillStyle = r; ctx.fillRect(0, 0, 32, 256);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -87,7 +90,7 @@ topLight.position.set(0, 3, 0.5); scene.add(topLight);
 // cinematic post-processing: subtle bloom for realistic catchlights + rim glow
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.22, 0.5, 0.82);
+const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.12, 0.45, 0.88); // restrained: no dreamy glow
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
@@ -587,7 +590,10 @@ new GLTFLoader()
         influences = head.morphTargetInfluences;
         targets = influences.slice();
         for (const [k, v] of Object.entries(head.morphTargetDictionary)) {
-          nameToIndex[k.replace("blendShape1.", "")] = v;
+          const clean = k.replace("blendShape1.", "");
+          nameToIndex[clean] = v;
+          // other ARKit exports name sides "...Left"/"...Right" instead of "_L"/"_R"
+          nameToIndex[clean.replace(/Left$/, "_L").replace(/Right$/, "_R")] = v;
         }
       }
       for (const n of MOUTH_NAMES) { const i = idx(n); if (i >= 0) mouthIdx.add(i); }
@@ -601,6 +607,13 @@ new GLTFLoader()
     (ev) => { if (ev.total) setLoader(`Loading Aria… ${Math.round((ev.loaded / ev.total) * 100)}%`); },
     (err) => {
       console.error("Avatar load failed:", err);
+      if (customModelUrl) {
+        // a bad custom model must never leave the page without an avatar
+        try { localStorage.removeItem("aria.avatarModel"); } catch {}
+        setLoader("Custom avatar could not be loaded — restoring the default. Reloading…");
+        setTimeout(() => location.reload(), 1500);
+        return;
+      }
       setLoader("Couldn't load the 3D avatar (check your internet connection, then reload).", false);
     }
   );
@@ -614,6 +627,21 @@ function findMorphMesh(root) {
   });
   return found;
 }
+function makePoreTexture() {
+  const size = 512, c = document.createElement("canvas");
+  c.width = c.height = size;
+  const ctx = c.getContext("2d"), img = ctx.createImageData(size, size);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const n = 128 + (Math.random() - 0.5) * 70 + (Math.random() < 0.012 ? -55 : 0); // pores
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = n; img.data[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(9, 9);
+  return tex;
+}
+
 function frameFace() {
   if (!faceRoot) return;
   const box = new THREE.Box3().setFromObject(faceRoot);
@@ -628,6 +656,8 @@ function frameFace() {
   camBase.copy(camera.position);
   lookAt.set(center.x, center.y, center.z);
 
+  const poreBump = makePoreTexture();
+
   // give the skin a touch more life from the environment
   faceRoot.traverse((o) => {
     if (o.isMesh && o.material) {
@@ -636,7 +666,11 @@ function frameFace() {
         if ("envMapIntensity" in m) m.envMapIntensity = 1.15;
         // soft, slightly satin skin instead of plastic shine
         if ("roughness" in m && m.name !== "eyes" && !/eye|teeth|tongue/i.test(m.name || o.name || "")) {
-          m.roughness = Math.max(m.roughness ?? 0.6, 0.58);
+          m.roughness = Math.max(m.roughness ?? 0.6, 0.62);
+          if ("bumpMap" in m && o === head) {
+            // fine pore/skin micro-detail removes the smooth plastic "doll" look
+            m.bumpMap = poreBump; m.bumpScale = 0.9;
+          }
           if ("sheen" in m) { m.sheen = 0.5; m.sheenRoughness = 0.5; m.sheenColor?.set?.(0xffc9b0); }
         }
         m.needsUpdate = true;

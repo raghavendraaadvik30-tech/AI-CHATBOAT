@@ -12,6 +12,7 @@ const TTS_MODE_STORE = "aria.ttsMode";
 const TTS_MODEL_STORE = "aria.ttsModel";
 const SARVAM_KEY_STORE = "aria.sarvamApiKey";
 const IMAGE_ASPECT_STORE = "aria.imageAspect";
+const AVATAR_MODEL_STORE = "aria.avatarModel";
 const DEFAULT_TTS_MODEL = "fish-audio/drama-3";
 
 const DEFAULT_MODEL = "openai/gpt-4o-mini";
@@ -86,6 +87,7 @@ const speechProvider = el("speechProvider");
 const modal = el("modal");
 const apiKeyInput = el("apiKey");
 const sarvamApiKeyInput = el("sarvamApiKey");
+const avatarModelInput = el("avatarModel");
 const modelInput = el("model");
 const personaInput = el("persona");
 const voiceSelect = el("voiceSelect");
@@ -258,6 +260,7 @@ function loadSettings() {
   ttsModeSelect.value = getTtsMode();
   ttsModelInput.value = getTtsModel();
   imageAspectSelect.value = getImageAspect();
+  avatarModelInput.value = store.get(AVATAR_MODEL_STORE) || "";
   populateVoices();
 }
 
@@ -301,6 +304,9 @@ saveBtn.addEventListener("click", () => {
   store.set(TTS_MODE_STORE, ["auto", "browser", "openrouter", "sarvam"].includes(ttsModeSelect.value) ? ttsModeSelect.value : "auto");
   store.set(TTS_MODEL_STORE, ttsModelInput.value.trim() || DEFAULT_TTS_MODEL);
   store.set(IMAGE_ASPECT_STORE, imageAspectSelect.value || "1:1");
+  const modelUrl = avatarModelInput.value.trim();
+  if (!modelUrl || /^https:\/\/|^\.?\.?\//.test(modelUrl)) store.set(AVATAR_MODEL_STORE, modelUrl);
+  else toast("Avatar model URL must start with https:// — it was not saved.", "error", 6000);
   document.documentElement.lang = language;
   store.set(VOICE_NAME_STORE, voiceSelect.value || "");
   syncAvatarSettings();
@@ -1232,6 +1238,20 @@ toBottomBtn?.addEventListener("click", () => {
   messagesBox.scrollTo({ top: messagesBox.scrollHeight, behavior: "smooth" });
 });
 new MutationObserver(updateToBottom).observe(messagesBox, { childList: true, subtree: true });
+
+// Gentle 3D tilt of the avatar card toward the pointer.
+const avatarCard = el("avatarCanvas");
+if (avatarCard && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+  let tiltFrame = 0;
+  window.addEventListener("pointermove", (event) => {
+    if (tiltFrame) return;
+    tiltFrame = requestAnimationFrame(() => {
+      tiltFrame = 0;
+      avatarCard.style.setProperty("--tx", ((event.clientX / innerWidth) * 2 - 1).toFixed(3));
+      avatarCard.style.setProperty("--ty", ((event.clientY / innerHeight) * 2 - 1).toFixed(3));
+    });
+  }, { passive: true });
+}
 
 // Escape closes the settings dialog.
 document.addEventListener("keydown", (event) => {

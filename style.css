@@ -785,3 +785,110 @@ body[data-phase="speaking"] .avatar-canvas {
   .sparkle, .orb, .avatar-name, .avatar-glow { animation: none !important; }
   .sparkle { display: none; }
 }
+
+/* =====================================================================
+   2026 design layer — aurora glass, spring motion, pill controls
+   ===================================================================== */
+:root {
+  --glass: rgba(255,255,255,.055);
+  --glass-strong: rgba(255,255,255,.09);
+  --edge: rgba(255,255,255,.14);
+  --ease-spring: cubic-bezier(.34,1.56,.64,1);
+  --font-display: "Plus Jakarta Sans", Inter, ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+}
+html, body { font-family: var(--font-display); }
+
+/* living aurora background */
+body::before {
+  content: ""; position: fixed; inset: -20%; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(40% 35% at 18% 22%, rgba(139,92,246,.42), transparent 70%),
+    radial-gradient(38% 34% at 82% 18%, rgba(45,226,230,.26), transparent 70%),
+    radial-gradient(42% 38% at 70% 85%, rgba(236,72,153,.26), transparent 70%),
+    radial-gradient(36% 32% at 15% 85%, rgba(59,130,246,.24), transparent 70%);
+  filter: blur(30px) saturate(115%);
+  animation: aurora 26s ease-in-out infinite alternate;
+}
+@keyframes aurora {
+  0%   { transform: translate3d(0,0,0) rotate(0deg) scale(1); }
+  50%  { transform: translate3d(3%,-2%,0) rotate(6deg) scale(1.08); }
+  100% { transform: translate3d(-3%,3%,0) rotate(-5deg) scale(1.04); }
+}
+/* fine film grain for a photographic, non-plastic finish */
+body::after {
+  content: ""; position: fixed; inset: 0; z-index: 50; pointer-events: none; opacity: .06; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+.orb { opacity: .22; }
+
+/* entrance choreography */
+.stage  { animation: rise-in .9s var(--ease-spring) both; }
+.chat   { animation: rise-in .9s .12s var(--ease-spring) both; }
+@keyframes rise-in { from { opacity: 0; transform: translateY(26px) scale(.985); } to { opacity: 1; transform: none; } }
+
+/* glass panels with bright top edge */
+.chat {
+  background: linear-gradient(160deg, rgba(255,255,255,.085), rgba(255,255,255,.035));
+  border: 1px solid var(--edge);
+  border-radius: 28px;
+  backdrop-filter: blur(22px) saturate(140%);
+  box-shadow: 0 40px 80px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.18);
+}
+.chat-head { border-bottom: 1px solid rgba(255,255,255,.08); }
+.chat-head-title { font-weight: 700; letter-spacing: -.2px; }
+
+/* pill controls */
+.icon-btn { background: var(--glass); border: 1px solid transparent; border-radius: 16px; }
+.icon-btn:hover { background: var(--glass-strong); border-color: var(--edge); transform: translateY(-2px); }
+.lang-bar { background: transparent; border-bottom: 0; padding: 12px 18px 4px; }
+.lang-chip { border-radius: 14px; background: var(--glass); backdrop-filter: blur(8px); }
+.lang-chip.active { transition: transform .35s var(--ease-spring); transform: scale(1.06); }
+
+/* bubbles */
+.msg { border-radius: 22px; box-shadow: 0 8px 22px rgba(0,0,0,.18); animation-timing-function: var(--ease-spring); }
+.msg.bot {
+  background: linear-gradient(145deg, rgba(139,92,246,.26), rgba(99,102,241,.12));
+  border: 1px solid rgba(167,139,250,.35);
+  border-bottom-left-radius: 8px;
+}
+.msg.me {
+  background: linear-gradient(135deg, #38e8ec, #3b82f6 70%, #6366f1);
+  box-shadow: 0 10px 26px rgba(59,130,246,.35);
+  border-bottom-right-radius: 8px;
+}
+
+/* floating composer with animated focus ring */
+.composer {
+  margin: 4px 16px 16px; padding: 8px;
+  border: 1px solid var(--edge); border-radius: 22px;
+  background: rgba(10,8,30,.45); backdrop-filter: blur(14px);
+  transition: box-shadow .3s ease, border-color .3s ease;
+}
+.composer:focus-within { border-color: rgba(167,139,250,.7); box-shadow: 0 0 0 4px rgba(139,92,246,.18), 0 14px 40px rgba(139,92,246,.25); }
+.composer-input { background: transparent; border: 0; box-shadow: none !important; }
+.send-btn { border-radius: 16px; background: linear-gradient(135deg, #a78bfa, #6d28d9); }
+.mic-btn { border-radius: 16px; }
+
+/* avatar card: bento glass + parallax tilt (--tx/--ty set by app.js) */
+.avatar-canvas {
+  border-radius: 32px;
+  border: 1px solid var(--edge);
+  transform: perspective(1100px) rotateY(calc(var(--tx, 0) * 5deg)) rotateX(calc(var(--ty, 0) * -4deg));
+  transition: transform .25s ease-out, border-color .35s ease, box-shadow .35s ease;
+  will-change: transform;
+}
+.avatar-canvas::after { border-radius: 32px; }
+.status-pill, .provider-pill { backdrop-filter: blur(10px); background: var(--glass); border-color: var(--edge); }
+.avatar-name { font-weight: 800; letter-spacing: -.5px; font-size: 36px; }
+.empty-hint .hint-title { font-weight: 800; letter-spacing: -.3px; }
+.quick-chip { border-radius: 16px; background: var(--glass); transition: transform .3s var(--ease-spring), border-color .2s; }
+.quick-chip:hover { transform: translateY(-3px) scale(1.03); }
+
+/* natural, softly lit portrait stage: removes the purple "toy" cast */
+.avatar-canvas::before {
+  background: radial-gradient(circle at 50% 38%, rgba(120,110,150,.28) 0%, rgba(30,26,60,.3) 46%, transparent 72%);
+}
+@media (prefers-reduced-motion: reduce) {
+  body::before, .stage, .chat { animation: none !important; }
+  .avatar-canvas { transform: none !important; }
+}
