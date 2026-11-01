@@ -89,6 +89,7 @@ const apiKeyInput = el("apiKey");
 const sarvamApiKeyInput = el("sarvamApiKey");
 const avatarModelInput = el("avatarModel");
 const skinToneSelect = el("skinToneSelect");
+const browsSelect = el("browsSelect");
 const modelInput = el("model");
 const personaInput = el("persona");
 const voiceSelect = el("voiceSelect");
@@ -133,7 +134,7 @@ const store = {
 };
 
 function removeRetiredProviderData() {
-  ["aria.googleApiKey", "aria.googleTtsModel", "aria.sonexApiKey", "aria.sonexVoiceId", "aria.stabilityApiKey", "aria.imageEngine", "aria.hairStyle", "aria.hairColor", "aria.hairCover", "aria.brows", "aria.lashes"]
+  ["aria.googleApiKey", "aria.googleTtsModel", "aria.sonexApiKey", "aria.sonexVoiceId", "aria.stabilityApiKey", "aria.imageEngine", "aria.hairStyle", "aria.hairColor", "aria.hairCover", "aria.lashes"]
     .forEach((key) => store.remove(key));
   if ((store.get(TTS_MODEL_STORE) || "").startsWith("google/")) {
     store.set(TTS_MODEL_STORE, DEFAULT_TTS_MODEL);
@@ -263,6 +264,7 @@ function loadSettings() {
   imageAspectSelect.value = getImageAspect();
   avatarModelInput.value = store.get(AVATAR_MODEL_STORE) || "";
   skinToneSelect.value = store.get("aria.skinTone") || "wheatish";
+  browsSelect.value = store.get("aria.brows") === "off" ? "off" : "on";
   populateVoices();
 }
 
@@ -307,6 +309,7 @@ saveBtn.addEventListener("click", () => {
   store.set(TTS_MODEL_STORE, ttsModelInput.value.trim() || DEFAULT_TTS_MODEL);
   store.set(IMAGE_ASPECT_STORE, imageAspectSelect.value || "1:1");
   window.ariaAvatar?.setSkinTone?.(skinToneSelect.value || "wheatish");
+  window.ariaAvatar?.setBrows?.(browsSelect.value !== "off");
   const modelUrl = avatarModelInput.value.trim();
   if (!modelUrl || /^https:\/\/|^\.?\.?\//.test(modelUrl)) store.set(AVATAR_MODEL_STORE, modelUrl);
   else toast("Avatar model URL must start with https:// — it was not saved.", "error", 6000);

@@ -86,6 +86,10 @@ rimLight.position.set(-1.3, 1.7, -2.3); scene.add(rimLight);
 scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x8a5a44, 0.35));
 const topLight = new THREE.DirectionalLight(0xffffff, 0.5);
 topLight.position.set(0, 3, 0.5); scene.add(topLight);
+// "ring light" from the viewer's side: on the glossy eyes it produces a real,
+// correctly placed catchlight sparkle; on matte skin it is only a soft fill.
+const catchLight = new THREE.DirectionalLight(0xffffff, 0.45);
+catchLight.position.set(0.6, 0.9, 3); scene.add(catchLight);
 
 // cinematic post-processing: subtle bloom for realistic catchlights + rim glow
 const composer = new EffectComposer(renderer);
@@ -606,6 +610,7 @@ new GLTFLoader()
       if (loaderEl) loaderEl.remove();
       container.classList.add("ready"); // trigger CSS fade-in
       resize();
+      try { applyBrows(browsOn); } catch (error) { reportAvatarError("brows", error); }
     },
     (ev) => { if (ev.total) setLoader(`Loading Aria… ${Math.round((ev.loaded / ev.total) * 100)}%`); },
     (err) => {
@@ -631,6 +636,99 @@ function findMorphMesh(root) {
   });
   return found;
 }
+// ================================================================ brows (painted into the skin)
+// Darkens the skin's own vertices in the brow area, located from the real eye
+// positions in world space. Nothing is added on top of the face, so the brows
+// can never float or smear, and they move with every expression automatically.
+function isEyeMesh(o) { return !!o && o.isMesh && o !== head && /eye/i.test(o.name || "") && !/lash|brow/i.test(o.name || ""); }
+
+let browsOn = true;
+try { browsOn = localStorage.getItem("aria.brows") !== "off"; } catch {}
+const BROW_TINT = [0.3, 0.24, 0.21];   // multiplies the skin colour -> dark brown brow
+const LID_TINT = [0.62, 0.56, 0.54];   // very soft upper lash line
+
+function browWeights() {
+  const pos = head.geometry.attributes.position, nor = head.geometry.attributes.normal;
+  if (!pos || !nor) return null;
+  faceRoot.updateMatrixWorld(true);
+  const eyes = [];
+  faceRoot.traverse((o) => {
+    if (!isEyeMesh(o)) return;
+    const box = new THREE.Box3().setFromObject(o), size = box.getSize(new THREE.Vector3());
+    const r = Math.max(size.x, size.y, size.z) / 2;
+    if (r > 0 && Number.isFinite(r)) eyes.push({ c: box.getCenter(new THREE.Vector3()), r });
+  });
+  if (eyes.length < 2) return null;
+  eyes.sort((a, b) => a.c.x - b.c.x);
+  const pair = [eyes[0], eyes[eyes.length - 1]];
+  const midX = (pair[0].c.x + pair[1].c.x) / 2;
+  const gap = Math.abs(pair[1].c.x - pair[0].c.x);
+  if (!(gap > pair[0].r)) return null;      // eyes must be clearly apart
+
+  const nm = new THREE.Matrix3().getNormalMatrix(head.matrixWorld);
+  const p = new THREE.Vector3(), n = new THREE.Vector3();
+  const brow = new Float32Array(pos.count), lid = new Float32Array(pos.count);
+  const smooth = (e0, e1, x) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+
+  for (let i = 0; i < pos.count; i++) {
+    p.set(pos.getX(i), pos.getY(i), pos.getZ(i)); head.localToWorld(p);
+    n.set(nor.getX(i), nor.getY(i), nor.getZ(i)).applyMatrix3(nm).normalize();
+    if (n.z < 0.25) continue;                                     // front of the face only
+    for (const { c, r } of pair) {
+      if (p.z < c.z - r * 1.2) continue;                          // not behind the eye
+      const inward = Math.sign(midX - c.x) || 1;
+      // brow: from just inside the eye toward the temple, gently arched
+      const innerX = c.x + inward * r * 1.25, tailX = c.x - inward * r * 1.95;
+      const t = (p.x - innerX) / (tailX - innerX);
+      if (t > -0.12 && t < 1.12) {
+        const arch = t < 0.65 ? 0.32 * Math.sin((Math.max(0, t) / 0.65) * Math.PI / 2) : 0.32 - 0.62 * Math.pow((t - 0.65) / 0.35, 1.3);
+        const line = c.y + r * (1.72 + arch);
+        const half = r * (0.3 * Math.pow(1 - Math.min(1, Math.max(0, t)), 0.6) + 0.12);
+        const across = 1 - smooth(half * 0.55, half, Math.abs(p.y - line));
+        const along = smooth(-0.12, 0.06, t) * (1 - smooth(0.85, 1.12, t));
+        brow[i] = Math.max(brow[i], across * along);
+      }
+      // soft upper lash line just above the eye opening
+      const dx = (p.x - c.x) / (r * 1.05);
+      if (Math.abs(dx) < 1) {
+        const lidY = c.y + r * (0.06 + 0.42 * (1 - dx * dx)); // follows the eye opening: corners -> top of the lid
+        const w = (1 - smooth(r * 0.06, r * 0.16, Math.abs(p.y - lidY))) * (1 - smooth(0.75, 1, Math.abs(dx)));
+        lid[i] = Math.max(lid[i], w);
+      }
+    }
+  }
+  let count = 0;
+  for (let i = 0; i < brow.length; i++) if (brow[i] > 0.05) count++;
+  // sanity: a brow is a small patch of the face, never a large area
+  if (count === 0 || count > pos.count * 0.08) return null;
+  return { brow, lid, count };
+}
+
+function applyBrows(on) {
+  browsOn = !!on;
+  try { localStorage.setItem("aria.brows", browsOn ? "on" : "off"); } catch {}
+  if (!head || !head.geometry?.attributes?.position) return;
+  const geo = head.geometry, count = geo.attributes.position.count;
+  const colors = new Float32Array(count * 3).fill(1);
+  if (browsOn) {
+    const w = browWeights();
+    if (w) {
+      for (let i = 0; i < count; i++) {
+        for (let k = 0; k < 3; k++) {
+          const b = 1 + (BROW_TINT[k] - 1) * w.brow[i] * 0.95;
+          const l = 1 + (LID_TINT[k] - 1) * w.lid[i] * 0.55;
+          colors[i * 3 + k] = Math.min(b, l);
+        }
+      }
+    } else {
+      console.warn("Aria: eye positions not found; brows not painted.");
+    }
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  const mats = Array.isArray(head.material) ? head.material : [head.material];
+  for (const m of mats) { if (m) { m.vertexColors = true; m.needsUpdate = true; } }
+}
+
 // ================================================================ skin tone
 // The built-in scan is untextured (pale grey). A warm, natural skin colour is
 // applied to the face only — eyes, teeth and tongue keep their own materials.
@@ -675,6 +773,11 @@ function frameFace() {
         if (o === head && "roughness" in m) {
           m.roughness = Math.max(m.roughness ?? 0.6, 0.55); // soft skin, not plastic
           m.color?.copy?.(skinBase);
+        } else if (isEyeMesh(o) && "roughness" in m) {
+          // moist, glossy eyes: reflections + catchlight make them look alive
+          m.roughness = 0.07;
+          m.metalness = 0;
+          if ("envMapIntensity" in m) m.envMapIntensity = 1.7;
         }
         m.needsUpdate = true;
       }
@@ -1037,6 +1140,7 @@ window.ariaAvatar = {
   setVoice(on) { voiceOn = !!on; if (!on) cancelSpeak(); },
   setLanguage(language) { preferredLanguage = language || "en-IN"; },
   setSkinTone(name) { setSkinTone(name); },
+  setBrows(on) { try { applyBrows(on); } catch (error) { reportAvatarError("brows", error); } },
   setPhase(next) {
     thinking = next === "thinking";
     listening = next === "listening";
