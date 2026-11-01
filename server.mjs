@@ -1,10 +1,35 @@
 import http from "node:http";
 import { readFile, stat } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
+
+// Settings file: put your keys in a ".env" file next to server.mjs (one KEY=value per
+// line) so you don't have to set them in every new terminal. It is git-ignored.
+// Values already set in the terminal win over the file.
+export function loadEnvFile(file = path.join(ROOT, ".env")) {
+  let text;
+  try { text = readFileSync(file, "utf8"); } catch { return []; }
+  const loaded = [];
+  for (const raw of text.replace(/^\uFEFF/, "").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const m = line.match(/^(?:export\s+|\$env:)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!m) continue;
+    let value = m[2].trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+    else value = value.replace(/\s+#.*$/, "");
+    if (!value || process.env[m[1]]) continue;
+    process.env[m[1]] = value;
+    loaded.push(m[1]);
+  }
+  return loaded;
+}
+const envLoaded = loadEnvFile();
+
 const HOST = process.env.HOST || "127.0.0.1";
 const PORT = Number(process.env.PORT || 8000);
 const MAX_JSON_BYTES = 32 * 1024;
@@ -277,6 +302,9 @@ const realSessions = new Map(); // id -> { avatar, lastUsed, createdAt }
 let realSdk = null;
 
 function realConfigured() { return Boolean(process.env.TALKING_AVATAR_API_KEY && process.env.TALKING_AVATAR_ID); }
+function realMissing() {
+  return ["TALKING_AVATAR_API_KEY", "TALKING_AVATAR_ID", "SARVAM_API_KEY"].filter((k) => !process.env[k]);
+}
 
 async function loadRealSdk() {
   if (realSdk) return realSdk;
@@ -357,8 +385,11 @@ export function resamplePcm(pcm, from, to) {
 async function handleRealStart(req, res) {
   if (req.method !== "POST") return json(res, 405, { error: "Method not allowed" });
   if (!sameOrigin(req)) return json(res, 403, { error: "Cross-origin requests are not allowed" });
-  if (!realConfigured()) return json(res, 503, { error: "Realistic avatar is not configured (set TALKING_AVATAR_API_KEY and TALKING_AVATAR_ID)", code: "real_unconfigured" });
-  if (!process.env.SARVAM_API_KEY) return json(res, 503, { error: "The realistic avatar speaks with the Sarvam voice: set SARVAM_API_KEY too", code: "real_needs_sarvam" });
+  const missing = realMissing();
+  if (missing.length) {
+    const code = missing.length === 1 && missing[0] === "SARVAM_API_KEY" ? "real_needs_sarvam" : "real_unconfigured";
+    return json(res, 503, { error: `Realistic avatar needs: ${missing.join(", ")}`, code, missing });
+  }
   if (realSessions.size >= 2) return json(res, 429, { error: "A realistic avatar is already running in another tab. Close it first." });
   const { LiveAvatar, WebSocket } = await loadRealSdk();
   let avatar;
@@ -498,7 +529,9 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`Aria running at http://${HOST}:${PORT}`);
+  if (envLoaded.length) console.log(`Loaded from .env: ${envLoaded.join(", ")}`);
   console.log(cloudflareConfigured() ? "Cloudflare Workers AI image proxy enabled" : "Image proxy disabled (set CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID)");
   console.log(process.env.SARVAM_API_KEY ? "Sarvam speech proxy enabled" : "Sarvam speech proxy disabled (set SARVAM_API_KEY or use browser fallback)");
-  console.log(realConfigured() ? "Realistic avatar (talking-avatar.dev) enabled" : "Realistic avatar disabled (set TALKING_AVATAR_API_KEY + TALKING_AVATAR_ID)");
+  const realMiss = realMissing();
+  console.log(!realMiss.length ? "Realistic avatar (talking-avatar.dev) enabled" : `Realistic avatar disabled — missing: ${realMiss.join(", ")}`);
 });

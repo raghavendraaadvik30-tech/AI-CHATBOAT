@@ -83,13 +83,12 @@ the server (Kannada, Hindi, Tamil, Telugu, Malayalam, English) and the avatar sp
 with real lip sync. Billing is $0.02/min; a session closes itself after 3 idle minutes
 and always within 20 minutes.
 
-```powershell
-npm install                                   # once: installs the avatar SDK + ws
-$env:TALKING_AVATAR_API_KEY = "tav_..."       # dashboard -> API keys
-$env:TALKING_AVATAR_ID      = "your-avatar-id" # dashboard -> Quickstart
-$env:SARVAM_API_KEY         = "your-sarvam-key"
-node server.mjs
-```
+1. Run `npm install` once in the project folder.
+2. Copy `env.example` to `.env` (same folder) and fill in `TALKING_AVATAR_API_KEY`,
+   `TALKING_AVATAR_ID` (dashboard → Quickstart) and `SARVAM_API_KEY`.
+   `.env` is git-ignored and never served to the browser.
+3. Run `node server.mjs`. It prints `Realistic avatar (talking-avatar.dev) enabled`,
+   or exactly which setting is missing.
 
 Optional: `TALKING_AVATAR_IDLE_SECONDS` (default 180), `TALKING_AVATAR_MAX_MINUTES` (default 20).
 

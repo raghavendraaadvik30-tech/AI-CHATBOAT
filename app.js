@@ -1314,8 +1314,9 @@ async function startRealAvatar() {
     let body = {};
     try { body = await response.json(); } catch {}
     if (!response.ok) {
-      if (body.code === "real_unconfigured" || response.status === 404) {
-        throw new Error("Realistic avatar is not set up. In PowerShell set  $env:TALKING_AVATAR_API_KEY  and  $env:TALKING_AVATAR_ID  (avatar ID from the talking-avatar.dev dashboard → Quickstart), run  npm install, then  node server.mjs.");
+      if (body.code === "real_unconfigured" || body.code === "real_needs_sarvam" || response.status === 404) {
+        const missing = Array.isArray(body.missing) && body.missing.length ? body.missing.join(", ") : "TALKING_AVATAR_API_KEY, TALKING_AVATAR_ID";
+        throw new Error(`Realistic avatar is not set up — the server is missing: ${missing}. Add them to the .env file in the project folder (see README), then stop the server (Ctrl+C) and run  node server.mjs  again.`);
       }
       throw new Error(body.error || `Realistic avatar failed to start (${response.status}).`);
     }
