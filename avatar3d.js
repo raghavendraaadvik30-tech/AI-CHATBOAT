@@ -140,6 +140,7 @@ let emotionGain = 0, emotionTarget = 0;
 let thinking = false, listening = false;
 let microSmile = 0, nextSmile = 6;
 let prevEnergy = 0;
+let microT = 0, microX = 0, microY = 0, pupilScale = 1;
 let vibe = 0, lastVibeWritten = -1;
 const RIM_IDLE = new THREE.Color(0xeaf1ff);
 const RIM_SPEAK = new THREE.Color(0x9ff6ff);
@@ -637,7 +638,7 @@ let eyeballs = [];
 
 // Painted human eye: warm sclera, fibrous brown iris, limbal ring, pupil.
 // Equirectangular layout: the iris faces +Z at u=0.25, v=0.5 on a SphereGeometry.
-function makeEyeTexture(irisHex = "#6b4423") {
+function makeEyeTexture(irisHex = "#7a4a26") {
   const W = 1024, H = 512, cx = 256, cy = 256, R = 92;
   const c = document.createElement("canvas");
   c.width = W; c.height = H;
@@ -663,9 +664,23 @@ function makeEyeTexture(irisHex = "#6b4423") {
     g.lineWidth = 0.6 + Math.random() * 1.4;
     g.beginPath(); g.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0); g.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1); g.stroke();
   }
-  // limbal ring + pupil
-  g.strokeStyle = "rgba(10,6,4,0.75)"; g.lineWidth = 7; g.beginPath(); g.arc(cx, cy, R - 2, 0, Math.PI * 2); g.stroke();
-  g.fillStyle = "#050302"; g.beginPath(); g.arc(cx, cy, R * 0.36, 0, Math.PI * 2); g.fill();
+  // warm golden-hazel ring around the pupil (gives depth and warmth)
+  const collar = g.createRadialGradient(cx, cy, R * 0.3, cx, cy, R * 0.62);
+  collar.addColorStop(0, "rgba(214,160,80,0.55)"); collar.addColorStop(1, "rgba(214,160,80,0)");
+  g.fillStyle = collar; g.beginPath(); g.arc(cx, cy, R * 0.62, 0, Math.PI * 2); g.fill();
+  // soft limbal ring (dark but feathered, like a real iris edge)
+  const limbal = g.createRadialGradient(cx, cy, R * 0.82, cx, cy, R * 1.04);
+  limbal.addColorStop(0, "rgba(12,7,4,0)"); limbal.addColorStop(0.6, "rgba(12,7,4,0.8)"); limbal.addColorStop(1, "rgba(12,7,4,0)");
+  g.fillStyle = limbal; g.beginPath(); g.arc(cx, cy, R * 1.04, 0, Math.PI * 2); g.fill();
+  // pupil with a slightly soft edge
+  const pupil = g.createRadialGradient(cx, cy, R * 0.3, cx, cy, R * 0.38);
+  pupil.addColorStop(0, "#040201"); pupil.addColorStop(1, "rgba(4,2,1,0)");
+  g.fillStyle = "#040201"; g.beginPath(); g.arc(cx, cy, R * 0.3, 0, Math.PI * 2); g.fill();
+  g.fillStyle = pupil; g.beginPath(); g.arc(cx, cy, R * 0.38, 0, Math.PI * 2); g.fill();
+  // gentle shadow from the upper lid onto the top of the eyeball
+  const lidShade = g.createLinearGradient(0, cy - R * 1.9, 0, cy - R * 0.2);
+  lidShade.addColorStop(0, "rgba(60,40,35,0.45)"); lidShade.addColorStop(1, "rgba(60,40,35,0)");
+  g.fillStyle = lidShade; g.fillRect(0, 0, W, cy - R * 0.2);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
@@ -710,20 +725,29 @@ function replaceEyes() {
     eye.position.copy(faceRoot.worldToLocal(worldCenter.clone()));
     eye.renderOrder = 1;
     eye.userData.radius = radius;
+    // tiny bright catchlight: the single biggest cue that an eye is alive
+    const glint = new THREE.Mesh(
+      new THREE.SphereGeometry(radius * 0.085, 12, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.92, depthWrite: false })
+    );
+    glint.position.set(radius * 0.32, radius * 0.36, radius * 0.93);
+    glint.renderOrder = 3;
+    eye.add(glint);
+    eye.userData.glint = glint;
     faceRoot.add(eye);
     original.visible = false;
     eyeballs.push(eye);
   }
 }
 
-// ================================================================ eyebrows & eyelashes
-// Ribbons of painted strands that are glued to the skin: every frame each ribbon
-// vertex follows its nearest head vertex through the active morph targets, so the
-// brows lift / frown and the lashes close together with the eyelids.
-const faceDetails = { group: null, strips: [], brows: true, lashes: true };
+// ================================================================ eyebrows
+// Ribbons of painted hairs glued to the skin: every frame each ribbon vertex
+// follows its nearest head vertex through the active morph targets, so the
+// brows lift and frown together with her expressions.
+const faceDetails = { group: null, strips: [], brows: true };
 try {
   faceDetails.brows = localStorage.getItem("aria.brows") !== "off";
-  faceDetails.lashes = localStorage.getItem("aria.lashes") !== "off";
+  localStorage.removeItem("aria.lashes");
 } catch {}
 
 function makeBrowTexture() {
@@ -754,25 +778,6 @@ function makeBrowTexture() {
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
-  return tex;
-}
-
-function makeLashTexture() {
-  const W = 512, H = 64, c = document.createElement("canvas");
-  c.width = W; c.height = H;
-  const g = c.getContext("2d");
-  g.clearRect(0, 0, W, H);
-  for (let i = 0; i < 150; i++) {
-    const u = Math.random(), x = u * W, len = H * (0.55 + Math.random() * 0.45);
-    g.strokeStyle = `rgba(10,7,6,${0.7 + Math.random() * 0.3})`;
-    g.lineWidth = 1.2 + Math.random() * 1.4;
-    g.beginPath(); g.moveTo(x, H);
-    g.quadraticCurveTo(x + 4 + u * 10, H - len * 0.6, x + 8 + u * 22, H - len); // lashes curl toward the outer corner
-    g.stroke();
-  }
-  g.fillStyle = "rgba(8,6,5,0.9)"; g.fillRect(0, H - 4, W, 4); // lash line
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
 
@@ -858,21 +863,6 @@ function buildFaceDetails() {
       addStrip(samples, tex, 0xffffff, 6);
     }
   }
-  if (faceDetails.lashes) {
-    const tex = makeLashTexture();
-    for (const { c, r } of eyes) {
-      const inward = Math.sign(midX - c.x) || 1;
-      const samples = [];
-      for (let i = 0; i < N; i++) {
-        const t = i / (N - 1), s = 2 * t - 1;
-        const x = c.x + inward * r * (1.05 - 2.1 * t);                      // inner corner → outer corner
-        const yBot = c.y + r * (0.45 * (1 - s * s) - 0.03);
-        const len = r * (0.12 + 0.2 * t);                                   // longer toward the outer corner
-        samples.push({ x, yBot, yTop: yBot + len, liftBot: r * 0.05, liftTop: r * 0.2 });
-      }
-      addStrip(samples, tex, 0xffffff, 7);
-    }
-  }
   if (!strips.length) return null;
   faceDetails.group = group;
   faceDetails.strips = strips;
@@ -903,24 +893,21 @@ function updateFaceDetails() {
   }
 }
 
-function setFaceDetails(browsOn, lashesOn) {
+function setFaceDetails(browsOn) {
   if (!head) return;
-  faceDetails.brows = !!browsOn; faceDetails.lashes = !!lashesOn;
-  try {
-    localStorage.setItem("aria.brows", browsOn ? "on" : "off");
-    localStorage.setItem("aria.lashes", lashesOn ? "on" : "off");
-  } catch {}
+  faceDetails.brows = !!browsOn;
+  try { localStorage.setItem("aria.brows", browsOn ? "on" : "off"); } catch {}
   if (faceDetails.group) {
     head.remove(faceDetails.group);
     faceDetails.group.traverse((o) => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
     faceDetails.group = null; faceDetails.strips = [];
   }
-  if (!faceDetails.brows && !faceDetails.lashes) return;
+  if (!faceDetails.brows) return;
   try {
     const group = buildFaceDetails();
     if (group) { head.add(group); updateFaceDetails(); }
   } catch (error) {
-    console.warn("Aria: brows/lashes could not be built", error);
+    console.warn("Aria: eyebrows could not be built", error);
     faceDetails.group = null; faceDetails.strips = [];
   }
 }
@@ -928,7 +915,7 @@ function setFaceDetails(browsOn, lashesOn) {
 function enhanceFace() {
   if (!faceRoot || !head) return;
   try { replaceEyes(); } catch (error) { console.warn("Aria: eye upgrade skipped", error); }
-  try { setFaceDetails(faceDetails.brows, faceDetails.lashes); } catch (error) { console.warn("Aria: face details skipped", error); }
+  try { setFaceDetails(faceDetails.brows); } catch (error) { console.warn("Aria: face details skipped", error); }
 }
 
 function makePoreTexture() {
@@ -1127,9 +1114,23 @@ function updateScene() {
     gazeX += (gazeTX - gazeX) * Math.min(1, dt * 10);
     gazeY += (gazeTY - gazeY) * Math.min(1, dt * 10);
     applyGaze();
+    // tiny involuntary eye tremor (micro-saccades) keeps the eyes alive while still
+    microT -= dt;
+    if (microT <= 0) { microX = (Math.random() - 0.5) * 0.022; microY = (Math.random() - 0.5) * 0.016; microT = 0.25 + Math.random() * 0.6; }
+    // the catchlight swells slightly with interest (listening/emotion), shrinks when thinking
+    const pupilTarget = 1 + (listening ? 0.08 : 0) + emotionGain * 0.06 - (thinking ? 0.05 : 0) + 0.02 * Math.sin(t * 0.6);
+    pupilScale += (pupilTarget - pupilScale) * Math.min(1, dt * 1.5);
     for (const eye of eyeballs) {
-      eye.rotation.y = THREE.MathUtils.clamp(gazeX, -1, 1) * 0.34;
-      eye.rotation.x = THREE.MathUtils.clamp(gazeY, -1, 1) * 0.26 - blink * 0.2;
+      eye.rotation.y = THREE.MathUtils.clamp(gazeX, -1, 1) * 0.34 + microX;
+      eye.rotation.x = THREE.MathUtils.clamp(gazeY, -1, 1) * 0.26 - blink * 0.2 + microY;
+      const glint = eye.userData.glint;
+      if (glint) {
+        // the reflection belongs to the light, not the eyeball: counter-rotate it
+        const r = eye.userData.radius;
+        glint.position.set(r * (0.32 - eye.rotation.y * 0.55), r * (0.36 + eye.rotation.x * 0.55), r * 0.93);
+        glint.scale.setScalar(pupilScale);
+        glint.material.opacity = 0.92 * (1 - blink); // hidden while the lid is closed
+      }
     }
 
     // Real neural-audio amplitude drives jaw/lip strength. This closes the
@@ -1223,8 +1224,13 @@ function updateScene() {
       const b = THREE.MathUtils.clamp(smileNow * 1.4 + emotionGain * 0.25, 0, 1);
       head.material.color.setRGB(1, 1 - 0.045 * b, 1 - 0.075 * b);
     }
-    // closing eyes also lift the lower lid / cheeks a touch
+    // a real blink pulls the brows down a hair and narrows the lower lid
     if (blink > 0.05) {
+      const dL = idx("browDown_L"), dR = idx("browDown_R"), sL = idx("eyeSquint_L"), sR = idx("eyeSquint_R");
+      if (dL >= 0) influences[dL] = Math.max(influences[dL], blink * 0.1);
+      if (dR >= 0) influences[dR] = Math.max(influences[dR], blink * 0.1);
+      if (sL >= 0) influences[sL] = Math.max(influences[sL], blink * 0.18);
+      if (sR >= 0) influences[sR] = Math.max(influences[sR], blink * 0.18);
       const cL = idx("cheekSquint_L"), cR = idx("cheekSquint_R");
       if (cL >= 0) influences[cL] = Math.max(influences[cL], blink * 0.14);
       if (cR >= 0) influences[cR] = Math.max(influences[cR], blink * 0.14);
@@ -1234,7 +1240,7 @@ function updateScene() {
     if (bL >= 0) influences[bL] = Math.max(blink * blinkProfile.left, lid);
     if (bR >= 0) influences[bR] = Math.max(blink * blinkProfile.right, lid);
 
-    // brows and lashes ride on the morphed skin, so run after every influence is final
+    // brows ride on the morphed skin, so run after every influence is final
     updateFaceDetails();
   }
 
@@ -1316,7 +1322,7 @@ function healIfBlank() {
   if (!canvasIsBlank()) return;
   healStage++;
   if (healStage === 1) {
-    reportAvatarError("blank canvas", new Error("removing eyebrows/eyelashes"));
+    reportAvatarError("blank canvas", new Error("removing eyebrows"));
     if (faceDetails.group) { head.remove(faceDetails.group); faceDetails.group = null; faceDetails.strips = []; }
   } else if (healStage === 2) {
     reportAvatarError("blank canvas", new Error("switching to plain rendering"));
@@ -1350,7 +1356,7 @@ window.ariaAvatar = {
   stopTalking() { cancelSpeak(); },
   setVoice(on) { voiceOn = !!on; if (!on) cancelSpeak(); },
   setLanguage(language) { preferredLanguage = language || "en-IN"; },
-  setFaceDetails(brows, lashes) { setFaceDetails(brows, lashes); },
+  setFaceDetails(brows) { setFaceDetails(brows); },
   setPhase(next) {
     thinking = next === "thinking";
     listening = next === "listening";

@@ -89,7 +89,6 @@ const apiKeyInput = el("apiKey");
 const sarvamApiKeyInput = el("sarvamApiKey");
 const avatarModelInput = el("avatarModel");
 const browsSelect = el("browsSelect");
-const lashesSelect = el("lashesSelect");
 const modelInput = el("model");
 const personaInput = el("persona");
 const voiceSelect = el("voiceSelect");
@@ -264,7 +263,6 @@ function loadSettings() {
   imageAspectSelect.value = getImageAspect();
   avatarModelInput.value = store.get(AVATAR_MODEL_STORE) || "";
   browsSelect.value = store.get("aria.brows") === "off" ? "off" : "on";
-  lashesSelect.value = store.get("aria.lashes") === "off" ? "off" : "on";
   populateVoices();
 }
 
@@ -308,7 +306,7 @@ saveBtn.addEventListener("click", () => {
   store.set(TTS_MODE_STORE, ["auto", "browser", "openrouter", "sarvam"].includes(ttsModeSelect.value) ? ttsModeSelect.value : "auto");
   store.set(TTS_MODEL_STORE, ttsModelInput.value.trim() || DEFAULT_TTS_MODEL);
   store.set(IMAGE_ASPECT_STORE, imageAspectSelect.value || "1:1");
-  window.ariaAvatar?.setFaceDetails?.(browsSelect.value !== "off", lashesSelect.value !== "off");
+  window.ariaAvatar?.setFaceDetails?.(browsSelect.value !== "off");
   const modelUrl = avatarModelInput.value.trim();
   if (!modelUrl || /^https:\/\/|^\.?\.?\//.test(modelUrl)) store.set(AVATAR_MODEL_STORE, modelUrl);
   else toast("Avatar model URL must start with https:// — it was not saved.", "error", 6000);
@@ -334,7 +332,7 @@ try { window.speechSynthesis?.addEventListener?.("voiceschanged", populateVoices
 window.addEventListener("aria-avatar-ready", syncAvatarSettings);
 // Surface avatar problems on screen (once each) instead of failing silently.
 window.addEventListener("aria-avatar-error", (event) => {
-  toast(`Avatar issue: ${event.detail}. The chat still works — try Ctrl+Shift+R, or turn off Eyebrows/Eyelashes in Settings.`, "error", 12000);
+  toast(`Avatar issue: ${event.detail}. The chat still works — try Ctrl+Shift+R, or turn off Eyebrows in Settings.`, "error", 12000);
 });
 window.addEventListener("aria-speech-error", (event) => {
   toast(event.detail || "Speech playback failed.", "error", 10000);
