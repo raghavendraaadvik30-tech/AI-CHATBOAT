@@ -1220,6 +1220,24 @@ function stopLive() {
 callBtn.addEventListener("click", () => { liveMode ? stopLive() : startLive(); });
 
 // ------------------------------------------------------------------ init
+// "Latest" button: appears when the user has scrolled up in a long chat.
+const toBottomBtn = el("toBottom");
+function updateToBottom() {
+  if (!toBottomBtn) return;
+  const away = messagesBox.scrollHeight - messagesBox.scrollTop - messagesBox.clientHeight;
+  toBottomBtn.hidden = away < 140;
+}
+messagesBox.addEventListener("scroll", updateToBottom, { passive: true });
+toBottomBtn?.addEventListener("click", () => {
+  messagesBox.scrollTo({ top: messagesBox.scrollHeight, behavior: "smooth" });
+});
+new MutationObserver(updateToBottom).observe(messagesBox, { childList: true, subtree: true });
+
+// Escape closes the settings dialog.
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !modal.hidden) closeModal();
+});
+
 document.querySelectorAll(".lang-chip").forEach((chip) => {
   chip.addEventListener("click", () => {
     window.ariaAvatar?.primeVoice?.();

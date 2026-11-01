@@ -248,6 +248,7 @@ body[data-phase="speaking"] .voice-wave span:nth-child(5) { animation-delay: -.1
 
 /* ---------- chat panel ---------- */
 .chat {
+  position: relative;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -266,9 +267,16 @@ body[data-phase="speaking"] .voice-wave span:nth-child(5) { animation-delay: -.1
 .chat-head-title { font-weight: 600; font-size: 17px; }
 .icon-btn {
   background: transparent; border: none; color: var(--muted);
-  font-size: 20px; cursor: pointer; width: 38px; height: 38px;
-  border-radius: 10px; transition: 0.2s;
+  font-size: 20px; cursor: pointer; min-width: 46px; height: 50px; padding: 4px 6px;
+  border-radius: 12px; transition: 0.2s;
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; line-height: 1;
 }
+.icon-btn[data-label]::after {
+  content: attr(data-label);
+  font-size: 10px; font-weight: 600; letter-spacing: .3px; opacity: .85;
+}
+.icon-btn:active { transform: scale(.93); }
+.icon-btn:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
 .icon-btn:hover { background: rgba(255,255,255,0.08); color: var(--text); }
 #settingsBtn:hover { transform: rotate(45deg); }
 .icon-btn.active { background: rgba(53,208,127,0.22); color: #7cf0ad; }
@@ -284,7 +292,8 @@ body[data-phase="speaking"] .voice-wave span:nth-child(5) { animation-delay: -.1
   box-shadow: 0 7px 18px rgba(200, 30, 74, 0.3);
 }
 .stop-btn:hover { background: linear-gradient(135deg, #ff7892, #dc2858); transform: scale(1.05); }
-.chat-head-actions { display: flex; align-items: center; gap: 4px; }
+.chat-head-actions { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; justify-content: flex-end; }
+.chat-head { flex-wrap: wrap; gap: 6px; }
 
 /* live camera preview (picture-in-picture over the avatar stage) */
 .cam-preview {
@@ -735,3 +744,44 @@ body[data-phase="speaking"] .voice-wave span:nth-child(5) { animation-delay: -.1
 }
 .modal h2 + .modal-section { border-top: 0; margin-top: 0; padding-top: 0; }
 .modal-note { margin: 0 0 12px; font-size: 13px; color: var(--muted); line-height: 1.5; }
+
+/* ---------- sparkles, reactive avatar glow, scroll button ---------- */
+.sparkle {
+  position: absolute; bottom: -10px; left: var(--x);
+  width: var(--s); height: var(--s); border-radius: 50%;
+  background: #fff; opacity: 0;
+  box-shadow: 0 0 10px 2px rgba(180,160,255,.8);
+  animation: rise var(--d) linear infinite; animation-delay: var(--o);
+}
+@keyframes rise {
+  0% { transform: translateY(0) scale(.6); opacity: 0; }
+  12% { opacity: .8; }
+  100% { transform: translateY(-105vh) translateX(24px) scale(1.1); opacity: 0; }
+}
+/* the avatar frame glows with the live voice level (--energy 0..1 set by avatar3d.js) */
+.avatar-canvas { --energy: 0; }
+body[data-phase="speaking"] .avatar-canvas {
+  box-shadow: 0 30px 75px rgba(0,0,0,.55),
+    0 0 calc(18px + var(--energy) * 60px) rgba(45,226,230, calc(.18 + var(--energy) * .5));
+}
+.to-bottom {
+  position: absolute; right: 22px; bottom: 86px; z-index: 4;
+  border: 0; border-radius: 999px; padding: 8px 14px;
+  font: inherit; font-size: 12px; font-weight: 600; color: #fff; cursor: pointer;
+  background: linear-gradient(135deg, var(--accent), #6d28d9);
+  box-shadow: 0 8px 22px rgba(109,40,217,.45);
+  animation: pop .25s ease;
+}
+.to-bottom:hover { transform: translateY(-2px); }
+.avatar-name {
+  background: linear-gradient(90deg, #fff, #cbb8ff, #7ff3f5, #fff);
+  background-size: 200% auto;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+  animation: name-shine 6s linear infinite;
+}
+@keyframes name-shine { to { background-position: 200% center; } }
+@media (prefers-reduced-motion: reduce) {
+  .sparkle, .orb, .avatar-name, .avatar-glow { animation: none !important; }
+  .sparkle { display: none; }
+}

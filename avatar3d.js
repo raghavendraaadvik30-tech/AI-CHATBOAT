@@ -137,6 +137,11 @@ let emotionGain = 0, emotionTarget = 0;
 let thinking = false, listening = false;
 let microSmile = 0, nextSmile = 6;
 let prevEnergy = 0;
+let vibe = 0, lastVibeWritten = -1;
+const RIM_IDLE = new THREE.Color(0xeaf1ff);
+const RIM_SPEAK = new THREE.Color(0x9ff6ff);
+const RIM_LISTEN = new THREE.Color(0xffb3c6);
+const RIM_THINK = new THREE.Color(0xffe3a1);
 
 // pointer tracking — she looks toward your cursor (big "alive" boost)
 let px = 0, py = 0, tpx = 0, tpy = 0;
@@ -898,6 +903,18 @@ function animate() {
     camera.position.z = camBase.z;
     camera.lookAt(lookAt);
   }
+
+  // live voice level -> CSS glow, bloom and rim-light colour (cheap, per frame)
+  const jaw = influences && idx("jawOpen") >= 0 ? influences[idx("jawOpen")] : 0;
+  const level = THREE.MathUtils.clamp(Math.max(audioEnergy, talking ? jaw * 1.4 : 0), 0, 1);
+  vibe += (level - vibe) * Math.min(1, dt * 14);
+  if (Math.abs(vibe - lastVibeWritten) > 0.02) {
+    container.style.setProperty("--energy", vibe.toFixed(2));
+    lastVibeWritten = vibe;
+  }
+  bloom.strength = 0.22 + vibe * 0.12;
+  const tint = talking ? RIM_SPEAK : listening ? RIM_LISTEN : thinking ? RIM_THINK : RIM_IDLE;
+  rimLight.color.lerp(tint, Math.min(1, dt * 3));
 
   composer.render();
 }
