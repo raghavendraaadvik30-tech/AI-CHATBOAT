@@ -1046,6 +1046,22 @@ async function runTurn(text) {
     // speak in the language the reply was actually written in
     turn.language = scriptLanguage(reply) || turn.language;
 
+    if (realSession) {
+      let realSpeech = null;
+      try { realSpeech = await realSay(reply, turn); }
+      catch (error) {
+        if (error?.name === "AbortError") throw error;
+        toast(`${error.message || "Realistic avatar speech failed"} — using the 3D avatar voice.`, "error", 9000);
+      }
+      if (realSpeech) {
+        showTyping(false);
+        setPhase("speaking");
+        setSpeechProvider("Realistic avatar · Sarvam voice", "active");
+        await Promise.all([realSpeech.done, typeOut(reply, turn)]);
+        return; // finally{} below resets the phase and resumes a live call
+      }
+    }
+
     let neuralSpeech = null;
     if (shouldUseNeuralSpeech(turn.language)) {
       setSpeechProvider("Connecting voice…", "loading");
@@ -1237,6 +1253,139 @@ function stopLive() {
 }
 
 callBtn.addEventListener("click", () => { liveMode ? stopLive() : startLive(); });
+
+// ------------------------------------------------------------------ realistic human avatar
+// talking-avatar.dev streams a photoreal person to the page; the server voices each
+// reply with Sarvam and pushes the audio to it, so lips and voice stay in sync.
+const realBtn = el("realBtn");
+const realBox = el("realAvatar");
+const realVideo = el("realVideo");
+const realStatus = el("realStatus");
+const realStatusText = el("realStatusText");
+const realUnmute = el("realUnmute");
+const avatarStage = el("avatarCanvas");
+let realSession = null;      // { id, view }
+let realStarting = false;
+
+function postJson(url, body, extra = {}) {
+  return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}), ...extra });
+}
+
+function showRealStatus(text, done = false) {
+  if (realStatusText) realStatusText.textContent = text;
+  realStatus?.classList.toggle("done", done);
+}
+
+function onRealViewStatus(status) {
+  if (status === "live") { showRealStatus("", true); if (realUnmute) realUnmute.hidden = true; }
+  else if (status === "muted") { showRealStatus("", true); if (realUnmute) realUnmute.hidden = false; }
+  else if (status === "reconnecting") showRealStatus("Reconnecting…");
+  else if (status === "connecting") showRealStatus("Connecting to your realistic avatar…");
+}
+
+function endRealAvatar({ quiet = false, reason = "" } = {}) {
+  const session = realSession;
+  realSession = null;
+  realStarting = false;
+  try { session?.view?.disconnect(); } catch {}
+  realVideo?.replaceChildren();
+  if (session?.id) postJson("/api/realavatar/stop", { sessionId: session.id }, { keepalive: true }).catch(() => {});
+  if (realBox) realBox.hidden = true;
+  if (realUnmute) realUnmute.hidden = true;
+  avatarStage?.classList.remove("real-on");
+  realBtn?.classList.remove("active");
+  if (realBtn) realBtn.title = "Switch to a realistic human avatar (talking-avatar.dev)";
+  setSpeechProvider("Automatic voice");
+  if (!quiet && session) toast(reason || "Back to the 3D avatar.");
+}
+
+async function startRealAvatar() {
+  if (realSession || realStarting) return;
+  if (location.protocol === "file:") { toast("Open the app through  node server.mjs  to use the realistic avatar.", "error"); return; }
+  realStarting = true;
+  window.ariaAvatar?.stopTalking?.();
+  realBtn?.classList.add("active");
+  if (realBox) realBox.hidden = false;
+  avatarStage?.classList.add("real-on");
+  showRealStatus("Starting your realistic avatar…");
+  setSpeechProvider("Connecting realistic avatar…", "loading");
+  try {
+    const response = await postJson("/api/realavatar/start", {});
+    let body = {};
+    try { body = await response.json(); } catch {}
+    if (!response.ok) {
+      if (body.code === "real_unconfigured" || response.status === 404) {
+        throw new Error("Realistic avatar is not set up. In PowerShell set  $env:TALKING_AVATAR_API_KEY  and  $env:TALKING_AVATAR_ID  (avatar ID from the talking-avatar.dev dashboard → Quickstart), run  npm install, then  node server.mjs.");
+      }
+      throw new Error(body.error || `Realistic avatar failed to start (${response.status}).`);
+    }
+    if (!realStarting) { postJson("/api/realavatar/stop", { sessionId: body.sessionId }).catch(() => {}); return; }
+
+    let mod;
+    try { mod = await import("/vendor/talking-avatar/live.js"); }
+    catch { postJson("/api/realavatar/stop", { sessionId: body.sessionId }).catch(() => {}); throw new Error("The realistic avatar viewer is not installed. Stop the server, run  npm install, then  node server.mjs."); }
+    if (!realStarting) { postJson("/api/realavatar/stop", { sessionId: body.sessionId }).catch(() => {}); return; }
+
+    const id = body.sessionId;
+    const view = new mod.LiveAvatarView({
+      container: realVideo,
+      endpoint: async (payload) => {
+        const res = await postJson(`/api/realavatar/view?session=${encodeURIComponent(id)}`, payload);
+        let data = {};
+        try { data = await res.json(); } catch {}
+        if (res.status === 410) { endRealAvatar({ reason: "The realistic avatar session ended (idle or time limit)." }); }
+        if (!res.ok) throw new Error(data.error || `view ${res.status}`);
+        return data;
+      },
+      onStatus: onRealViewStatus,
+      onError: (error) => console.warn("Realistic avatar:", error),
+    });
+    realSession = { id, view };
+    realStarting = false;
+    if (realBtn) realBtn.title = "Back to the 3D avatar";
+    view.connect();
+    setSpeechProvider("Realistic avatar · Sarvam voice", "active");
+    toast(`Realistic avatar is live. It ends by itself after ${Math.round((body.idleSeconds || 180) / 60)} idle minutes to save credits.`, "info", 8000);
+  } catch (error) {
+    realStarting = false;
+    endRealAvatar({ quiet: true });
+    toast(error.message || "Realistic avatar failed.", "error", 14000);
+  }
+}
+
+// Speaks a reply on the realistic avatar. Returns { done } — a promise that settles when
+// the speech has finished or been interrupted — or null when the avatar is unavailable.
+// (Wrapped in an object: an async function returning a bare promise would be flattened.)
+async function realSay(text, turn) {
+  const session = realSession;
+  if (!session) return null;
+  const response = await postJson("/api/realavatar/say", { sessionId: session.id, text: cleanSpokenText(text), language: turn.language }, { signal: turn.controller.signal });
+  let body = {};
+  try { body = await response.json(); } catch {}
+  if (response.status === 410) { endRealAvatar({ reason: "The realistic avatar session ended; using the 3D avatar." }); return null; }
+  if (!response.ok) throw new Error(body.error || `Realistic avatar speech failed (${response.status})`);
+  const waitMs = Math.max(400, Number(body.durationMs) || 0) + 700;   // + streaming latency
+  const done = new Promise((resolve) => {
+    const timer = setTimeout(resolve, waitMs);
+    turn.controller.signal.addEventListener("abort", () => {
+      clearTimeout(timer);
+      postJson("/api/realavatar/clear", { sessionId: session.id }).catch(() => {});
+      resolve();
+    }, { once: true });
+  });
+  return { done };
+}
+
+function cleanSpokenText(text) {
+  return String(text || "").replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "").replace(/[*_#`>]/g, "").trim() || " ";
+}
+
+realBtn?.addEventListener("click", () => { (realSession || realStarting) ? endRealAvatar() : startRealAvatar(); });
+el("realEnd")?.addEventListener("click", () => endRealAvatar());
+realUnmute?.addEventListener("click", () => { realSession?.view?.unmute(); realUnmute.hidden = true; });
+window.addEventListener("pagehide", () => {
+  if (realSession) postJson("/api/realavatar/stop", { sessionId: realSession.id }, { keepalive: true }).catch(() => {});
+});
 
 // ------------------------------------------------------------------ init
 // "Latest" button: appears when the user has scrolled up in a long chat.

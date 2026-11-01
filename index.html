@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <meta name="theme-color" content="#0d0b1f" />
-  <link rel="stylesheet" href="style.css?v=34" />
+  <link rel="stylesheet" href="style.css?v=35" />
 
   <!-- Three.js via import map (jsDelivr: reliable CORS + binary assets) -->
   <script type="importmap">
@@ -41,6 +41,13 @@
     <section class="stage" aria-label="AI avatar">
       <div class="avatar-glow"></div>
       <div class="avatar-canvas" id="avatarCanvas" role="img" aria-label="Aria 3D avatar">
+        <div class="real-avatar" id="realAvatar" hidden>
+          <div class="real-video" id="realVideo"></div>
+          <div class="real-status" id="realStatus"><div class="spinner"></div><span id="realStatusText">Connecting to your realistic avatar…</span></div>
+          <span class="real-badge"><span class="cam-dot"></span> Realistic</span>
+          <button type="button" class="real-unmute" id="realUnmute" hidden>🔊 Tap for sound</button>
+          <button type="button" class="real-end" id="realEnd">End</button>
+        </div>
         <div class="avatar-loader" id="avatarLoader">
           <div class="spinner"></div>
           <span id="loaderText">Loading Aria…</span>
@@ -80,6 +87,7 @@
         <div class="chat-head-actions">
           <button id="callBtn" class="icon-btn" data-label="Call" title="Start live voice conversation" aria-label="Start live conversation">📞</button>
           <button id="stopBtn" class="icon-btn stop-btn" data-label="Stop" title="Stop response" aria-label="Stop response" hidden>■</button>
+          <button id="realBtn" class="icon-btn real-btn" data-label="Real" title="Switch to a realistic human avatar (talking-avatar.dev)" aria-label="Realistic human avatar">🧑</button>
           <button id="cameraBtn" class="icon-btn" data-label="Camera" title="Let Aria see you (camera)" aria-label="Toggle camera">📷</button>
           <button id="voiceBtn" class="icon-btn" data-label="Sound" title="Toggle voice" aria-label="Toggle voice">🔊</button>
           <button id="settingsBtn" class="icon-btn" data-label="Settings" title="Settings" aria-label="Settings">⚙</button>
@@ -228,6 +236,7 @@
           <option value="dark">Dark</option>
         </select>
       </label>
+      <p class="modal-note">Want a real-looking person? Tap <strong>🧑 Real</strong> in the chat header. It uses talking-avatar.dev ($0.02/min, set up on the server) and ends by itself after a few idle minutes.</p>
       <h3 class="modal-section">5 · Personality</h3>
       <label class="field">
         <span>Personality (system prompt)</span>
@@ -244,7 +253,7 @@
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
   <!-- 3D avatar engine, followed by app coordinator -->
-  <script type="module" src="avatar3d.js?v=34"></script>
-  <script type="module" src="app.js?v=34"></script>
+  <script type="module" src="avatar3d.js?v=35"></script>
+  <script type="module" src="app.js?v=35"></script>
 </body>
 </html>

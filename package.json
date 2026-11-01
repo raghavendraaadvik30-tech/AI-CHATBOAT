@@ -6,6 +6,10 @@
   "scripts": {
     "start": "node server.mjs"
   },
+  "dependencies": {
+    "@interviewflowai/talking-avatar": "^0.2.0",
+    "ws": "^8.18.0"
+  },
   "engines": {
     "node": ">=18"
   }

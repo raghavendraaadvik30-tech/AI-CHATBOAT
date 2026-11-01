@@ -75,6 +75,24 @@ Settings. Server environment keys stay server-side. OpenRouter and Cloudflare
 credentials are sent only to their matching provider. Retired provider
 credentials and old speech-model settings are purged on load.
 
+## 🧑 Realistic human avatar (optional)
+
+Tap **🧑 Real** in the chat header to swap the 3D face for a photoreal person from
+[talking-avatar.dev](https://talking-avatar.dev). Aria's reply is voiced by Sarvam on
+the server (Kannada, Hindi, Tamil, Telugu, Malayalam, English) and the avatar speaks it
+with real lip sync. Billing is $0.02/min; a session closes itself after 3 idle minutes
+and always within 20 minutes.
+
+```powershell
+npm install                                   # once: installs the avatar SDK + ws
+$env:TALKING_AVATAR_API_KEY = "tav_..."       # dashboard -> API keys
+$env:TALKING_AVATAR_ID      = "your-avatar-id" # dashboard -> Quickstart
+$env:SARVAM_API_KEY         = "your-sarvam-key"
+node server.mjs
+```
+
+Optional: `TALKING_AVATAR_IDLE_SECONDS` (default 180), `TALKING_AVATAR_MAX_MINUTES` (default 20).
+
 ## 📁 Project structure
 
 ```
