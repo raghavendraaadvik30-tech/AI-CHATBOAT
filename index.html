@@ -4,7 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Aria · AI Avatar · Code Origin.AI</title>
-  <link rel="stylesheet" href="style.css?v=16" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <meta name="theme-color" content="#0d0b1f" />
+  <link rel="stylesheet" href="style.css?v=37" />
 
   <!-- Three.js via import map (jsDelivr: reliable CORS + binary assets) -->
   <script type="importmap">
@@ -21,6 +25,15 @@
     <span class="orb orb-1"></span>
     <span class="orb orb-2"></span>
     <span class="orb orb-3"></span>
+    <span class="sparkle" style="--x:8%;--d:11s;--s:4px;--o:0s"></span>
+    <span class="sparkle" style="--x:18%;--d:14s;--s:3px;--o:-4s"></span>
+    <span class="sparkle" style="--x:29%;--d:12s;--s:5px;--o:-7s"></span>
+    <span class="sparkle" style="--x:41%;--d:16s;--s:3px;--o:-2s"></span>
+    <span class="sparkle" style="--x:52%;--d:13s;--s:4px;--o:-9s"></span>
+    <span class="sparkle" style="--x:63%;--d:15s;--s:3px;--o:-5s"></span>
+    <span class="sparkle" style="--x:74%;--d:11s;--s:5px;--o:-10s"></span>
+    <span class="sparkle" style="--x:86%;--d:17s;--s:4px;--o:-3s"></span>
+    <span class="sparkle" style="--x:94%;--d:12s;--s:3px;--o:-8s"></span>
   </div>
 
   <main class="app">
@@ -28,6 +41,13 @@
     <section class="stage" aria-label="AI avatar">
       <div class="avatar-glow"></div>
       <div class="avatar-canvas" id="avatarCanvas" role="img" aria-label="Aria 3D avatar">
+        <div class="real-avatar" id="realAvatar" hidden>
+          <div class="real-video" id="realVideo"></div>
+          <div class="real-status" id="realStatus"><div class="spinner"></div><span id="realStatusText">Connecting to your realistic avatar…</span></div>
+          <span class="real-badge"><span class="cam-dot"></span> Realistic</span>
+          <button type="button" class="real-unmute" id="realUnmute" hidden>🔊 Tap for sound</button>
+          <button type="button" class="real-end" id="realEnd">End</button>
+        </div>
         <div class="avatar-loader" id="avatarLoader">
           <div class="spinner"></div>
           <span id="loaderText">Loading Aria…</span>
@@ -65,17 +85,39 @@
       <header class="chat-head">
         <div class="chat-head-title">Chat with Aria <span class="chat-head-brand">by Code Origin.AI</span></div>
         <div class="chat-head-actions">
-          <button id="callBtn" class="icon-btn" title="Start live voice conversation" aria-label="Start live conversation">📞</button>
-          <button id="stopBtn" class="icon-btn stop-btn" title="Stop response" aria-label="Stop response" hidden>■</button>
-          <button id="cameraBtn" class="icon-btn" title="Let Aria see you (camera)" aria-label="Toggle camera">📷</button>
-          <button id="voiceBtn" class="icon-btn" title="Toggle voice" aria-label="Toggle voice">🔊</button>
-          <button id="settingsBtn" class="icon-btn" title="Settings" aria-label="Settings">⚙</button>
+          <button id="callBtn" class="icon-btn" data-label="Call" title="Start live voice conversation" aria-label="Start live conversation">📞</button>
+          <button id="stopBtn" class="icon-btn stop-btn" data-label="Stop" title="Stop response" aria-label="Stop response" hidden>■</button>
+          <button id="realBtn" class="icon-btn real-btn" data-label="Real" title="Switch to a realistic human avatar (talking-avatar.dev)" aria-label="Realistic human avatar">🧑</button>
+          <button id="cameraBtn" class="icon-btn" data-label="Camera" title="Let Aria see you (camera)" aria-label="Toggle camera">📷</button>
+          <button id="voiceBtn" class="icon-btn" data-label="Sound" title="Toggle voice" aria-label="Toggle voice">🔊</button>
+          <button id="settingsBtn" class="icon-btn" data-label="Settings" title="Settings" aria-label="Settings">⚙</button>
         </div>
       </header>
 
-      <div class="messages" id="messages" aria-live="polite">
-        <div class="empty-hint" id="emptyHint">Chat by typing or voice. Say “generate an image of…” to create art automatically, or use 🎤, 📷 and 📞 for live conversation.</div>
+      <div class="lang-bar" id="langBar" role="group" aria-label="Conversation language">
+        <button type="button" class="lang-chip" data-lang="en-IN" title="Talk in English">English</button>
+        <button type="button" class="lang-chip" data-lang="kn-IN" title="Talk in Kannada">ಕನ್ನಡ</button>
+        <button type="button" class="lang-chip" data-lang="hi-IN" title="Talk in Hindi">हिन्दी</button>
+        <button type="button" class="lang-chip" data-lang="ta-IN" title="Talk in Tamil">தமிழ்</button>
+        <button type="button" class="lang-chip" data-lang="te-IN" title="Talk in Telugu">తెలుగు</button>
+        <button type="button" class="lang-chip" data-lang="ml-IN" title="Talk in Malayalam">മലയാളം</button>
       </div>
+
+      <div class="messages" id="messages" aria-live="polite">
+        <div class="empty-hint" id="emptyHint">
+          <p class="hint-title">Hi, I’m Aria 👋</p>
+          <p>Type, speak, or tap a quick start. Choose your language above — I’ll reply and speak in it.</p>
+          <div class="quick-starts">
+            <button type="button" class="quick-chip" data-prompt="Hello Aria, introduce yourself briefly">👋 Say hello</button>
+            <button type="button" class="quick-chip" data-prompt="I want to talk in Kannada">🗣 Talk in Kannada</button>
+            <button type="button" class="quick-chip" data-prompt="Generate an image of a tiger in a forest">🎨 Create an image</button>
+            <button type="button" class="quick-chip" data-prompt="Tell me an interesting fact">💡 Fun fact</button>
+          </div>
+          <p class="hint-keys">🎤 one question &nbsp;·&nbsp; 📞 live conversation &nbsp;·&nbsp; 📷 let Aria see &nbsp;·&nbsp; ⚙ settings</p>
+        </div>
+      </div>
+
+      <button type="button" class="to-bottom" id="toBottom" aria-label="Scroll to latest message" hidden>↓ Latest</button>
 
       <div class="typing" id="typing" hidden>
         <span></span><span></span><span></span>
@@ -106,20 +148,17 @@
   <div class="modal-backdrop" id="modal" hidden>
     <div class="modal">
       <h2>Settings</h2>
+      <h3 class="modal-section">1 · Chat</h3>
       <label class="field">
         <span>OpenRouter API key</span>
         <input id="apiKey" type="password" placeholder="sk-or-v1-…" autocomplete="off" />
         <small>Used for chat, camera vision, and fallback speech.</small>
       </label>
+      <h3 class="modal-section">2 · Voice &amp; language</h3>
       <label class="field">
         <span>Sarvam AI API key</span>
         <input id="sarvamApiKey" type="password" placeholder="sk_…" autocomplete="off" />
         <small>Primary voice for Indian languages (Kannada, Hindi, Tamil, Telugu, Malayalam…). Best used via the Node proxy with SARVAM_API_KEY.</small>
-      </label>
-      <label class="field">
-        <span>Stability AI API key</span>
-        <input id="stabilityApiKey" type="password" placeholder="sk-…" autocomplete="off" />
-        <small>Optional browser fallback. Recommended: run the Node proxy with STABILITY_API_KEY so the key stays server-side and CORS cannot block generation.</small>
       </label>
       <label class="field">
         <span>Model</span>
@@ -158,13 +197,8 @@
         </select>
         <small>Used when browser speech is selected or neural speech is unavailable.</small>
       </label>
-      <label class="field">
-        <span>Image quality</span>
-        <select id="imageEngineSelect">
-          <option value="core">Stable Image Core (fast)</option>
-          <option value="ultra">Stable Image Ultra (highest quality)</option>
-        </select>
-      </label>
+      <h3 class="modal-section">3 · Images</h3>
+      <p class="modal-note">Images use Cloudflare Workers AI. Its token is set on the server, not here.</p>
       <label class="field">
         <span>Image aspect ratio</span>
         <select id="imageAspectSelect">
@@ -175,6 +209,54 @@
           <option value="3:4">Classic portrait · 3:4</option>
         </select>
       </label>
+      <h3 class="modal-section">4 · Avatar</h3>
+      <label class="field">
+        <span>Custom avatar model URL (optional)</span>
+        <input id="avatarModel" type="text" placeholder="https://…/my-avatar.glb" autocomplete="off" />
+        <small>Advanced: a .glb with ARKit face blendshapes (e.g. a MetaHuman, Avaturn or Reallusion export) for a more photoreal face. Leave empty for the built-in face. Reload the page after saving.</small>
+      </label>
+      <label class="field">
+        <span>Eyebrows</span>
+        <select id="browsSelect"><option value="on">On</option><option value="off">Off</option></select>
+        <small>Painted into the skin, so they move with her expressions.</small>
+      </label>
+      <label class="field">
+        <span>Eye colour</span>
+        <select id="eyeColorSelect">
+          <option value="blue">Blue diamond</option>
+          <option value="green">Emerald green</option>
+          <option value="hazel">Hazel</option>
+          <option value="brown">Brown</option>
+          <option value="grey">Grey</option>
+          <option value="natural">Natural (model's own)</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Eyebrow colour</span>
+        <select id="browColorSelect">
+          <option value="darkbrown">Dark brown</option>
+          <option value="black">Black</option>
+          <option value="softbrown">Soft brown</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Cat-eye liner</span>
+        <select id="catEyeSelect"><option value="on">On</option><option value="off">Off</option></select>
+        <small>A soft winged lash line that makes the eyes stand out.</small>
+      </label>
+      <label class="field">
+        <span>Skin tone</span>
+        <select id="skinToneSelect">
+          <option value="fair">Fair</option>
+          <option value="light">Light</option>
+          <option value="wheatish">Wheatish</option>
+          <option value="medium">Medium</option>
+          <option value="brown">Brown</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+      <p class="modal-note">Want a real-looking person? Tap <strong>🧑 Real</strong> in the chat header. It uses talking-avatar.dev ($0.02/min, set up on the server) and ends by itself after a few idle minutes.</p>
+      <h3 class="modal-section">5 · Personality</h3>
       <label class="field">
         <span>Personality (system prompt)</span>
         <textarea id="persona" rows="3"></textarea>
@@ -190,7 +272,7 @@
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
   <!-- 3D avatar engine, followed by app coordinator -->
-  <script type="module" src="avatar3d.js?v=16"></script>
-  <script type="module" src="app.js?v=16"></script>
+  <script type="module" src="avatar3d.js?v=37"></script>
+  <script type="module" src="app.js?v=37"></script>
 </body>
 </html>

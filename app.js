@@ -11,9 +11,8 @@ const LANGUAGE_STORE = "aria.language";
 const TTS_MODE_STORE = "aria.ttsMode";
 const TTS_MODEL_STORE = "aria.ttsModel";
 const SARVAM_KEY_STORE = "aria.sarvamApiKey";
-const STABILITY_KEY_STORE = "aria.stabilityApiKey";
-const IMAGE_ENGINE_STORE = "aria.imageEngine";
 const IMAGE_ASPECT_STORE = "aria.imageAspect";
+const AVATAR_MODEL_STORE = "aria.avatarModel";
 const DEFAULT_TTS_MODEL = "fish-audio/drama-3";
 
 const DEFAULT_MODEL = "openai/gpt-4o-mini";
@@ -21,12 +20,15 @@ const DEFAULT_PERSONA =
   "You are Aria, a warm, natural and concise AI companion. " +
   "When camera frames are attached, inspect them carefully before answering. " +
   "For counting, count only clearly visible items. For colours and objects, be precise. " +
-  "If the view is unclear, say that briefly instead of guessing.";
+  "If the view is unclear, say that briefly instead of guessing. " +
+  "You are fluent in English, Kannada, Hindi, Tamil, Telugu and Malayalam. " +
+  "If the user asks to talk in one of these languages, or writes in it, answer in that language and script right away. " +
+  "Never say you can only speak English.";
 
 const LANGUAGES = {
   "en-IN": {
     label: "English (India)",
-    replyRule: "Reply in natural conversational English unless the user explicitly requests another language.",
+    replyRule: "Reply in natural conversational English, unless the user writes in another language or asks to talk in one (Kannada, Hindi, Tamil, Telugu, Malayalam) — then reply fully in that language and script.",
     listening: "Listening…",
     thinking: "Thinking…",
     speaking: "Speaking…",
@@ -85,14 +87,18 @@ const speechProvider = el("speechProvider");
 const modal = el("modal");
 const apiKeyInput = el("apiKey");
 const sarvamApiKeyInput = el("sarvamApiKey");
-const stabilityApiKeyInput = el("stabilityApiKey");
+const avatarModelInput = el("avatarModel");
+const skinToneSelect = el("skinToneSelect");
+const browsSelect = el("browsSelect");
+const catEyeSelect = el("catEyeSelect");
+const eyeColorSelect = el("eyeColorSelect");
+const browColorSelect = el("browColorSelect");
 const modelInput = el("model");
 const personaInput = el("persona");
 const voiceSelect = el("voiceSelect");
 const languageSelect = el("languageSelect");
 const ttsModeSelect = el("ttsModeSelect");
 const ttsModelInput = el("ttsModel");
-const imageEngineSelect = el("imageEngineSelect");
 const imageAspectSelect = el("imageAspectSelect");
 const imageBtn = el("imageBtn");
 const toastsBox = el("toasts");
@@ -131,7 +137,7 @@ const store = {
 };
 
 function removeRetiredProviderData() {
-  ["aria.googleApiKey", "aria.googleTtsModel", "aria.sonexApiKey", "aria.sonexVoiceId"]
+  ["aria.googleApiKey", "aria.googleTtsModel", "aria.sonexApiKey", "aria.sonexVoiceId", "aria.stabilityApiKey", "aria.imageEngine", "aria.hairStyle", "aria.hairColor", "aria.hairCover", "aria.lashes"]
     .forEach((key) => store.remove(key));
   if ((store.get(TTS_MODEL_STORE) || "").startsWith("google/")) {
     store.set(TTS_MODEL_STORE, DEFAULT_TTS_MODEL);
@@ -140,8 +146,6 @@ function removeRetiredProviderData() {
 
 function getKey() { return store.get(KEY_STORE) || ""; }
 function getSarvamKey() { return store.get(SARVAM_KEY_STORE) || ""; }
-function getStabilityKey() { return store.get(STABILITY_KEY_STORE) || ""; }
-function getImageEngine() { return store.get(IMAGE_ENGINE_STORE) || "core"; }
 function getImageAspect() { return store.get(IMAGE_ASPECT_STORE) || "1:1"; }
 function getModel() { return store.get(MODEL_STORE) || DEFAULT_MODEL; }
 function getPersona() { return store.get(PERSONA_STORE) || DEFAULT_PERSONA; }
@@ -158,6 +162,62 @@ function getLanguage() {
   return LANGUAGES[value] ? value : "en-IN";
 }
 function langCopy() { return LANGUAGES[getLanguage()]; }
+
+// ---- automatic language switching -------------------------------------
+const SCRIPT_LANGS = [
+  ["kn-IN", /[\u0C80-\u0CFF]/g],
+  ["hi-IN", /[\u0900-\u097F]/g],
+  ["ta-IN", /[\u0B80-\u0BFF]/g],
+  ["te-IN", /[\u0C00-\u0C7F]/g],
+  ["ml-IN", /[\u0D00-\u0D7F]/g],
+];
+const LANGUAGE_WORDS = [
+  ["kn-IN", /ka+n+a*d|kanda?da|ಕನ್ನಡ/i],
+  ["hi-IN", /hindi|हिन्दी|हिंदी/i],
+  ["ta-IN", /tamil|தமிழ்/i],
+  ["te-IN", /telugu|తెలుగు/i],
+  ["ml-IN", /malayalam|മലയാളം/i],
+  ["en-IN", /english|ಇಂಗ್ಲಿಷ್|अंग्रेज़ी|अंग्रेजी/i],
+];
+
+// Language of the text, judged by its script (null when it is Latin/unknown).
+function scriptLanguage(text) {
+  let best = null, bestCount = 0;
+  for (const [code, re] of SCRIPT_LANGS) {
+    const count = (text.match(re) || []).length;
+    if (count > bestCount) { best = code; bestCount = count; }
+  }
+  return bestCount >= 2 ? best : null;
+}
+
+// Language the user is asking for ("talk in kannada", "kannadalli maatadu"…).
+function requestedLanguage(text) {
+  const bySpeech = /(talk|speak|reply|respond|answer|chat|converse|say|maat|baat|pesu|matlad)|ಮಾತ|बोल|बात|பேச|మాట్లా|സംസാര/i.test(text);
+  for (const [code, re] of LANGUAGE_WORDS) {
+    if (re.test(text) && (bySpeech || text.trim().split(/\s+/).length <= 3)) return code;
+  }
+  return scriptLanguage(text);
+}
+
+function renderLangChips() {
+  const current = getLanguage();
+  document.querySelectorAll(".lang-chip").forEach((chip) => {
+    const on = chip.dataset.lang === current;
+    chip.classList.toggle("active", on);
+    chip.setAttribute("aria-pressed", String(on));
+  });
+}
+
+function setLanguage(code) {
+  if (!LANGUAGES[code] || getLanguage() === code) return;
+  store.set(LANGUAGE_STORE, code);
+  if (languageSelect) languageSelect.value = code;
+  document.documentElement.lang = code;
+  window.ariaAvatar?.setLanguage?.(code);
+  populateVoices();
+  renderLangChips();
+  toast(`Language switched to ${LANGUAGES[code].label}`, "info", 3500);
+}
 
 // ------------------------------------------------------------------ settings
 function listBrowserVoices() {
@@ -199,14 +259,18 @@ function populateVoices() {
 function loadSettings() {
   apiKeyInput.value = getKey();
   sarvamApiKeyInput.value = getSarvamKey();
-  stabilityApiKeyInput.value = getStabilityKey();
   modelInput.value = getModel();
   personaInput.value = getPersona();
   languageSelect.value = getLanguage();
   ttsModeSelect.value = getTtsMode();
   ttsModelInput.value = getTtsModel();
-  imageEngineSelect.value = getImageEngine();
   imageAspectSelect.value = getImageAspect();
+  avatarModelInput.value = store.get(AVATAR_MODEL_STORE) || "";
+  skinToneSelect.value = store.get("aria.skinTone") || "wheatish";
+  browsSelect.value = store.get("aria.brows") === "off" ? "off" : "on";
+  catEyeSelect.value = store.get("aria.catEye") === "off" ? "off" : "on";
+  eyeColorSelect.value = store.get("aria.eyeColor") || "blue";
+  browColorSelect.value = store.get("aria.browColor") || "darkbrown";
   populateVoices();
 }
 
@@ -244,17 +308,24 @@ saveBtn.addEventListener("click", () => {
   const language = LANGUAGES[languageSelect.value] ? languageSelect.value : "en-IN";
   store.set(KEY_STORE, apiKeyInput.value.trim());
   store.set(SARVAM_KEY_STORE, sarvamApiKeyInput.value.trim());
-  store.set(STABILITY_KEY_STORE, stabilityApiKeyInput.value.trim());
   store.set(MODEL_STORE, modelInput.value.trim() || DEFAULT_MODEL);
   store.set(PERSONA_STORE, personaInput.value.trim() || DEFAULT_PERSONA);
   store.set(LANGUAGE_STORE, language);
   store.set(TTS_MODE_STORE, ["auto", "browser", "openrouter", "sarvam"].includes(ttsModeSelect.value) ? ttsModeSelect.value : "auto");
   store.set(TTS_MODEL_STORE, ttsModelInput.value.trim() || DEFAULT_TTS_MODEL);
-  store.set(IMAGE_ENGINE_STORE, imageEngineSelect.value || "core");
   store.set(IMAGE_ASPECT_STORE, imageAspectSelect.value || "1:1");
+  window.ariaAvatar?.setSkinTone?.(skinToneSelect.value || "wheatish");
+  window.ariaAvatar?.setEyeColor?.(eyeColorSelect.value || "blue");
+  window.ariaAvatar?.setBrowColor?.(browColorSelect.value || "darkbrown");
+  window.ariaAvatar?.setCatEye?.(catEyeSelect.value !== "off");
+  window.ariaAvatar?.setBrows?.(browsSelect.value !== "off");
+  const modelUrl = avatarModelInput.value.trim();
+  if (!modelUrl || /^https:\/\/|^\.?\.?\//.test(modelUrl)) store.set(AVATAR_MODEL_STORE, modelUrl);
+  else toast("Avatar model URL must start with https:// — it was not saved.", "error", 6000);
   document.documentElement.lang = language;
   store.set(VOICE_NAME_STORE, voiceSelect.value || "");
   syncAvatarSettings();
+  renderLangChips();
 
   const original = saveBtn.textContent;
   saveBtn.textContent = "Saved ✓";
@@ -271,6 +342,10 @@ saveBtn.addEventListener("click", () => {
 
 try { window.speechSynthesis?.addEventListener?.("voiceschanged", populateVoices); } catch {}
 window.addEventListener("aria-avatar-ready", syncAvatarSettings);
+// Surface avatar problems on screen (once each) instead of failing silently.
+window.addEventListener("aria-avatar-error", (event) => {
+  toast(`Avatar issue: ${event.detail}. The chat still works — try Ctrl+Shift+R, or reload the page.`, "error", 12000);
+});
 window.addEventListener("aria-speech-error", (event) => {
   toast(event.detail || "Speech playback failed.", "error", 10000);
 });
@@ -433,7 +508,7 @@ cameraBtn.addEventListener("click", () => {
 });
 window.addEventListener("pagehide", stopCamera);
 
-// ------------------------------------------------------------------ Stability AI image generation
+// ------------------------------------------------------------------ Cloudflare Workers AI image generation
 const generatedImageUrls = new Set();
 let imageGenerationSequence = 0;
 
@@ -502,7 +577,7 @@ function cancelImageGeneration(generation, timedOut = false) {
     generation.objectUrl = null;
   }
   showImageTerminal(generation, timedOut ? "Image generation timed out" : "Generation cancelled", true);
-  if (timedOut) toast("Image generation timed out. Try Stable Image Core or a shorter prompt.", "error", 8000);
+  if (timedOut) toast("Image generation timed out. Try a shorter prompt.", "error", 8000);
   releaseImageGeneration(generation);
 }
 
@@ -512,63 +587,28 @@ function assertGenerationActive(generation) {
   }
 }
 
-async function requestImageViaProxy(prompt, engine, aspectRatio, generation) {
-  if (location.protocol === "file:") return null;
-  const response = await fetch("/api/stability/generate", {
+async function requestGeneratedImage(prompt, aspectRatio, generation) {
+  generation.ui.state.textContent = "Generating through Cloudflare Workers AI…";
+  if (location.protocol === "file:") {
+    throw new Error("Open the app through `npm start` so the Cloudflare image proxy is available.");
+  }
+  const response = await fetch("/api/image/generate", {
     method: "POST",
     signal: generation.controller.signal,
     headers: { "Content-Type": "application/json", Accept: "image/*, application/json" },
-    body: JSON.stringify({ prompt, engine, aspectRatio }),
+    body: JSON.stringify({ prompt, aspectRatio }),
   });
   if (response.ok) return response.blob();
 
   let body = {};
   try { body = await response.json(); } catch {}
-  const unavailable = response.status === 404 || response.status === 405 || response.status === 501
-    || (response.status === 503 && body.code === "image_proxy_unconfigured");
-  if (unavailable) return null;
+  if (response.status === 503 && body.code === "image_proxy_unconfigured") {
+    throw new Error("Image generation is not configured. Set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN on the server.");
+  }
+  if (response.status === 404 || response.status === 405 || response.status === 501) {
+    throw new Error("Image proxy not found. Stop `python -m http.server` and run `npm start` (Node server) instead, with CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN set.");
+  }
   throw new Error(`Image proxy ${response.status}: ${body.detail || body.error || "request failed"}`);
-}
-
-async function requestImageDirect(prompt, engine, aspectRatio, generation) {
-  const key = getStabilityKey();
-  if (!key) {
-    const error = new Error("Configure STABILITY_API_KEY on the Node server or add a Stability key in Settings.");
-    error.code = "missing_stability_key";
-    throw error;
-  }
-  const form = new FormData();
-  form.append("prompt", prompt);
-  form.append("aspect_ratio", aspectRatio);
-  form.append("output_format", "png");
-
-  try {
-    const response = await fetch(`https://api.stability.ai/v2beta/stable-image/generate/${engine}`, {
-      method: "POST",
-      signal: generation.controller.signal,
-      headers: { Authorization: `Bearer ${key}`, Accept: "image/*" },
-      body: form,
-    });
-    if (!response.ok) {
-      const detail = (await response.text()).slice(0, 240);
-      throw new Error(`Stability AI ${response.status}: ${detail}`);
-    }
-    return response.blob();
-  } catch (error) {
-    if (error?.name === "TypeError") {
-      throw new Error("Direct Stability request was blocked by the network or browser CORS. Run `npm start` with STABILITY_API_KEY to use the same-origin proxy.");
-    }
-    throw error;
-  }
-}
-
-async function requestGeneratedImage(prompt, engine, aspectRatio, generation) {
-  generation.ui.state.textContent = "Connecting to image service…";
-  const proxied = await requestImageViaProxy(prompt, engine, aspectRatio, generation);
-  assertGenerationActive(generation);
-  if (proxied) return proxied;
-  generation.ui.state.textContent = "Generating through Stability AI…";
-  return requestImageDirect(prompt, engine, aspectRatio, generation);
 }
 
 function decodeGeneratedImage(image, generation) {
@@ -599,7 +639,6 @@ async function generateImage(prompt, displayedRequest = prompt) {
   addMessage("user", `${displayedRequest}  🎨`);
   input.value = "";
 
-  const engine = getImageEngine() === "ultra" ? "ultra" : "core";
   const generation = {
     id: ++imageGenerationSequence,
     controller: new AbortController(),
@@ -616,7 +655,7 @@ async function generateImage(prompt, displayedRequest = prompt) {
   imageBtn.classList.add("generating");
 
   const startedAt = Date.now();
-  const timeoutMs = engine === "ultra" ? 180_000 : 120_000;
+  const timeoutMs = 120_000;
   generation.timeoutId = setTimeout(() => cancelImageGeneration(generation, true), timeoutMs);
   generation.elapsedId = setInterval(() => {
     if (!generation.terminal) {
@@ -627,7 +666,7 @@ async function generateImage(prompt, displayedRequest = prompt) {
   generation.ui.cancel.addEventListener("click", () => cancelImageGeneration(generation, false), { once: true });
 
   try {
-    const blob = await requestGeneratedImage(text, engine, getImageAspect(), generation);
+    const blob = await requestGeneratedImage(text, getImageAspect(), generation);
     assertGenerationActive(generation);
     if (!blob.type.startsWith("image/")) throw new Error("Image service returned an unsupported response.");
     if (blob.size > 20 * 1024 * 1024) throw new Error("Generated image is larger than the 20 MB safety limit.");
@@ -662,6 +701,9 @@ async function generateImage(prompt, displayedRequest = prompt) {
     download.download = `aria-${Date.now()}.${extension}`;
     download.textContent = "Download";
     generation.ui.actions.append(open, download);
+    messagesBox.scrollTop = messagesBox.scrollHeight;
+    image.addEventListener("click", () => window.open(url, "_blank", "noopener"));
+    image.style.cursor = "zoom-in";
   } catch (error) {
     if (!generation.terminal) {
       generation.terminal = true;
@@ -671,7 +713,6 @@ async function generateImage(prompt, displayedRequest = prompt) {
         generation.objectUrl = null;
       }
       showImageTerminal(generation, "Image generation failed", true);
-      if (error?.code === "missing_stability_key") openModal();
       if (error?.name !== "AbortError") toast(error.message || "Image generation failed.", "error", 10000);
     }
   } finally {
@@ -832,7 +873,7 @@ async function fetchSarvamSpeech(text, turn, signal = turn.controller.signal) {
   }
 
   const key = getSarvamKey();
-  if (!key) throw new Error("Sarvam key is not configured");
+  if (!key) throw new Error("Sarvam voice is not set up. Stop the server, set $env:SARVAM_API_KEY (PowerShell), then run npm start again.");
   let response;
   try {
     response = await fetch("https://api.sarvam.ai/text-to-speech", {
@@ -984,6 +1025,9 @@ async function runTurn(text) {
     return;
   }
 
+  const wantedLanguage = requestedLanguage(value);
+  if (wantedLanguage) setLanguage(wantedLanguage);
+
   stopRecognition(true);
   const session = callSession;
   const turn = {
@@ -1005,6 +1049,24 @@ async function runTurn(text) {
 
     const reply = await askOpenRouter(value, frames, turn);
     if (turn.cancelled || turn !== activeTurn) throw new DOMException("Cancelled", "AbortError");
+    // speak in the language the reply was actually written in
+    turn.language = scriptLanguage(reply) || turn.language;
+
+    if (realSession) {
+      let realSpeech = null;
+      try { realSpeech = await realSay(reply, turn); }
+      catch (error) {
+        if (error?.name === "AbortError") throw error;
+        toast(`${error.message || "Realistic avatar speech failed"} — using the 3D avatar voice.`, "error", 9000);
+      }
+      if (realSpeech) {
+        showTyping(false);
+        setPhase("speaking");
+        setSpeechProvider("Realistic avatar · Sarvam voice", "active");
+        await Promise.all([realSpeech.done, typeOut(reply, turn)]);
+        return; // finally{} below resets the phase and resumes a live call
+      }
+    }
 
     let neuralSpeech = null;
     if (shouldUseNeuralSpeech(turn.language)) {
@@ -1198,10 +1260,176 @@ function stopLive() {
 
 callBtn.addEventListener("click", () => { liveMode ? stopLive() : startLive(); });
 
+// ------------------------------------------------------------------ realistic human avatar
+// talking-avatar.dev streams a photoreal person to the page; the server voices each
+// reply with Sarvam and pushes the audio to it, so lips and voice stay in sync.
+const realBtn = el("realBtn");
+const realBox = el("realAvatar");
+const realVideo = el("realVideo");
+const realStatus = el("realStatus");
+const realStatusText = el("realStatusText");
+const realUnmute = el("realUnmute");
+const avatarStage = el("avatarCanvas");
+let realSession = null;      // { id, view }
+let realStarting = false;
+
+function postJson(url, body, extra = {}) {
+  return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}), ...extra });
+}
+
+function showRealStatus(text, done = false) {
+  if (realStatusText) realStatusText.textContent = text;
+  realStatus?.classList.toggle("done", done);
+}
+
+function onRealViewStatus(status) {
+  if (status === "live") { showRealStatus("", true); if (realUnmute) realUnmute.hidden = true; }
+  else if (status === "muted") { showRealStatus("", true); if (realUnmute) realUnmute.hidden = false; }
+  else if (status === "reconnecting") showRealStatus("Reconnecting…");
+  else if (status === "connecting") showRealStatus("Connecting to your realistic avatar…");
+}
+
+function endRealAvatar({ quiet = false, reason = "" } = {}) {
+  const session = realSession;
+  realSession = null;
+  realStarting = false;
+  try { session?.view?.disconnect(); } catch {}
+  realVideo?.replaceChildren();
+  if (session?.id) postJson("/api/realavatar/stop", { sessionId: session.id }, { keepalive: true }).catch(() => {});
+  if (realBox) realBox.hidden = true;
+  if (realUnmute) realUnmute.hidden = true;
+  avatarStage?.classList.remove("real-on");
+  realBtn?.classList.remove("active");
+  if (realBtn) realBtn.title = "Switch to a realistic human avatar (talking-avatar.dev)";
+  setSpeechProvider("Automatic voice");
+  if (!quiet && session) toast(reason || "Back to the 3D avatar.");
+}
+
+async function startRealAvatar() {
+  if (realSession || realStarting) return;
+  if (location.protocol === "file:") { toast("Open the app through  node server.mjs  to use the realistic avatar.", "error"); return; }
+  realStarting = true;
+  window.ariaAvatar?.stopTalking?.();
+  realBtn?.classList.add("active");
+  if (realBox) realBox.hidden = false;
+  avatarStage?.classList.add("real-on");
+  showRealStatus("Starting your realistic avatar…");
+  setSpeechProvider("Connecting realistic avatar…", "loading");
+  try {
+    const response = await postJson("/api/realavatar/start", {});
+    let body = {};
+    try { body = await response.json(); } catch {}
+    if (!response.ok) {
+      if (body.code === "real_unconfigured" || body.code === "real_needs_sarvam" || response.status === 404) {
+        const missing = Array.isArray(body.missing) && body.missing.length ? body.missing.join(", ") : "TALKING_AVATAR_API_KEY, TALKING_AVATAR_ID";
+        throw new Error(`Realistic avatar is not set up — the server is missing: ${missing}. Add them to the .env file in the project folder (see README), then stop the server (Ctrl+C) and run  node server.mjs  again.`);
+      }
+      throw new Error(body.error || `Realistic avatar failed to start (${response.status}).`);
+    }
+    if (!realStarting) { postJson("/api/realavatar/stop", { sessionId: body.sessionId }).catch(() => {}); return; }
+
+    let mod;
+    try { mod = await import("/vendor/talking-avatar/live.js"); }
+    catch { postJson("/api/realavatar/stop", { sessionId: body.sessionId }).catch(() => {}); throw new Error("The realistic avatar viewer is not installed. Stop the server, run  npm install, then  node server.mjs."); }
+    if (!realStarting) { postJson("/api/realavatar/stop", { sessionId: body.sessionId }).catch(() => {}); return; }
+
+    const id = body.sessionId;
+    const view = new mod.LiveAvatarView({
+      container: realVideo,
+      endpoint: async (payload) => {
+        const res = await postJson(`/api/realavatar/view?session=${encodeURIComponent(id)}`, payload);
+        let data = {};
+        try { data = await res.json(); } catch {}
+        if (res.status === 410) { endRealAvatar({ reason: "The realistic avatar session ended (idle or time limit)." }); }
+        if (!res.ok) throw new Error(data.error || `view ${res.status}`);
+        return data;
+      },
+      onStatus: onRealViewStatus,
+      onError: (error) => console.warn("Realistic avatar:", error),
+    });
+    realSession = { id, view };
+    realStarting = false;
+    if (realBtn) realBtn.title = "Back to the 3D avatar";
+    view.connect();
+    setSpeechProvider("Realistic avatar · Sarvam voice", "active");
+    toast(`Realistic avatar is live. It ends by itself after ${Math.round((body.idleSeconds || 180) / 60)} idle minutes to save credits.`, "info", 8000);
+  } catch (error) {
+    realStarting = false;
+    endRealAvatar({ quiet: true });
+    toast(error.message || "Realistic avatar failed.", "error", 14000);
+  }
+}
+
+// Speaks a reply on the realistic avatar. Returns { done } — a promise that settles when
+// the speech has finished or been interrupted — or null when the avatar is unavailable.
+// (Wrapped in an object: an async function returning a bare promise would be flattened.)
+async function realSay(text, turn) {
+  const session = realSession;
+  if (!session) return null;
+  const response = await postJson("/api/realavatar/say", { sessionId: session.id, text: cleanSpokenText(text), language: turn.language }, { signal: turn.controller.signal });
+  let body = {};
+  try { body = await response.json(); } catch {}
+  if (response.status === 410) { endRealAvatar({ reason: "The realistic avatar session ended; using the 3D avatar." }); return null; }
+  if (!response.ok) throw new Error(body.error || `Realistic avatar speech failed (${response.status})`);
+  const waitMs = Math.max(400, Number(body.durationMs) || 0) + 700;   // + streaming latency
+  const done = new Promise((resolve) => {
+    const timer = setTimeout(resolve, waitMs);
+    turn.controller.signal.addEventListener("abort", () => {
+      clearTimeout(timer);
+      postJson("/api/realavatar/clear", { sessionId: session.id }).catch(() => {});
+      resolve();
+    }, { once: true });
+  });
+  return { done };
+}
+
+function cleanSpokenText(text) {
+  return String(text || "").replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "").replace(/[*_#`>]/g, "").trim() || " ";
+}
+
+realBtn?.addEventListener("click", () => { (realSession || realStarting) ? endRealAvatar() : startRealAvatar(); });
+el("realEnd")?.addEventListener("click", () => endRealAvatar());
+realUnmute?.addEventListener("click", () => { realSession?.view?.unmute(); realUnmute.hidden = true; });
+window.addEventListener("pagehide", () => {
+  if (realSession) postJson("/api/realavatar/stop", { sessionId: realSession.id }, { keepalive: true }).catch(() => {});
+});
+
 // ------------------------------------------------------------------ init
+// "Latest" button: appears when the user has scrolled up in a long chat.
+const toBottomBtn = el("toBottom");
+function updateToBottom() {
+  if (!toBottomBtn) return;
+  const away = messagesBox.scrollHeight - messagesBox.scrollTop - messagesBox.clientHeight;
+  toBottomBtn.hidden = away < 140;
+}
+messagesBox.addEventListener("scroll", updateToBottom, { passive: true });
+toBottomBtn?.addEventListener("click", () => {
+  messagesBox.scrollTo({ top: messagesBox.scrollHeight, behavior: "smooth" });
+});
+new MutationObserver(updateToBottom).observe(messagesBox, { childList: true, subtree: true });
+
+// Escape closes the settings dialog.
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !modal.hidden) closeModal();
+});
+
+document.querySelectorAll(".lang-chip").forEach((chip) => {
+  chip.addEventListener("click", () => {
+    window.ariaAvatar?.primeVoice?.();
+    setLanguage(chip.dataset.lang);
+  });
+});
+document.querySelectorAll(".quick-chip").forEach((chip) => {
+  chip.addEventListener("click", () => {
+    window.ariaAvatar?.primeVoice?.();
+    runTurn(chip.dataset.prompt);
+  });
+});
+
 function init() {
   removeRetiredProviderData();
   loadSettings();
+  renderLangChips();
   document.documentElement.lang = getLanguage();
   applyVoice(store.get(VOICE_STORE) !== "off");
   syncAvatarSettings();
